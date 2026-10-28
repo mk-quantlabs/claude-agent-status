@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
 
 - `install.sh` installs the plugin in Claude Code (loaded in place from the cloned folder), so plain `claude` reports its status; `--no-plugin` skips it. `uninstall.sh` removes it.
 - `claude-s` runs plain `claude` when the plugin is installed in Claude Code, so it is never loaded twice.

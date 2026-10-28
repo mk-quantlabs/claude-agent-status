@@ -1,6 +1,6 @@
 {
   "name": "agent-status",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Live status board for all running Claude Code agents with click-to-focus, approval alerts and keep-awake while agents work. Menu bar, web dashboard, desktop widget and a Stream Deck-ready API.",
   "author": { "name": "Agent Status contributors" },
   "license": "MIT",
