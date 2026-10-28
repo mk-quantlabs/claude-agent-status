@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 # Agent Status installer.
-#   ./install.sh               adds the `claude-s` command and the menu-bar icon (macOS)
-#   ./install.sh --no-menubar  adds the `claude-s` command only
+#   ./install.sh               installs the plugin in Claude Code, adds the `claude-s` command and
+#                              the menu-bar icon (macOS)
+#   ./install.sh --no-plugin   skips the Claude Code plugin install (use `claude-s` to start sessions)
+#   ./install.sh --no-menubar  skips the menu-bar icon
 set -euo pipefail
 
 ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MENUBAR=1
+PLUGIN=1
+PLUGIN_OK=0
 for arg in "$@"; do
   case "$arg" in
     --no-menubar) MENUBAR=0 ;;
-    -h|--help) sed -n '2,4p' "$0"; exit 0 ;;
+    --no-plugin) PLUGIN=0 ;;
+    -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 1 ;;
   esac
 done
@@ -58,6 +63,18 @@ else
   echo "    $line"
 fi
 
+# Claude Code plugin: loaded in place from this folder by every `claude` session
+if [ "$PLUGIN" = 1 ] && command -v claude >/dev/null; then
+  if claude plugin marketplace add "$ROOT" >/dev/null 2>&1 && claude plugin install agent-status@agent-status >/dev/null 2>&1; then
+    ok "Plugin installed in Claude Code: every claude session reports its status"
+    PLUGIN_OK=1
+  else
+    note "Plugin install failed; start sessions with claude-s instead (or retry: claude plugin install agent-status@agent-status)"
+  fi
+elif [ "$PLUGIN" = 1 ]; then
+  note "Claude Code not found: plugin not installed; run ./install.sh again after installing Claude Code"
+fi
+
 # Menu-bar icon (macOS)
 if [ "$MENUBAR" = 1 ] && [ "$(uname)" = "Darwin" ]; then
   "$ROOT/bin/claude-s" menubar --no-claude && ok "Menu-bar icon ready" || note "Menu-bar setup skipped (run: claude-s menubar)"
@@ -66,8 +83,16 @@ elif [ "$MENUBAR" = 1 ]; then
 fi
 
 echo
-echo "${b}Done.${n} Open a new terminal (or run: source $rc), then start Claude with:"
-echo
-echo "    ${b}claude-s${n}"
+if [ "$PLUGIN_OK" = 1 ]; then
+  echo "${b}Done.${n} Start Claude as usual in any project:"
+  echo
+  echo "    ${b}claude${n}"
+  echo
+  echo "Helper commands (open a new terminal or run: source $rc): claude-s status, claude-s awake, claude-s help"
+else
+  echo "${b}Done.${n} Open a new terminal (or run: source $rc), then start Claude with:"
+  echo
+  echo "    ${b}claude-s${n}"
+fi
 echo
 echo "Dashboard: http://127.0.0.1:4317   ·   All options: claude-s help"

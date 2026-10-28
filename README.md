@@ -5,8 +5,8 @@
 <h1 align="center">Agent Status for Claude Code</h1>
 
 <p align="center">
-  One place to see every Claude Code session you have running: which ones are working, which need you, which are stuck, and which are done.<br>
-  Click one and you're back in its window.
+  See all your Claude Code sessions in one place, know when one needs you,<br>
+  and let them keep working while your Mac is locked. Click one and you're back in its window.
 </p>
 
 <p align="center">
@@ -21,6 +21,11 @@
   <img src="docs/images/click-to-focus.gif" width="720" alt="Clicking an agent in the menu bar jumps to its iTerm2 tab, then to a JetBrains IDE window">
 </p>
 
+- **See every session at once**: in progress, needs approval, retry or done, across all your terminals and IDEs
+- **Jump to any session** with one click: the exact iTerm2 / Terminal tab, or the right IDE window
+- **Know when an agent needs you**: approval requests show up everywhere, even as a notification on the lock screen
+- **Agents keep working while your Mac is locked**: no idle sleep while an agent is working; normal sleep returns when they're done
+
 ---
 
 ## Quick start
@@ -32,13 +37,13 @@ git clone https://github.com/mk-quantlabs/claude-agent-status.git ~/claude-agent
 ~/claude-agent-status/install.sh
 ```
 
-Open a new terminal, go to any project, and start Claude with:
+The installer adds the plugin to Claude Code, so you keep starting Claude the usual way:
 
 ```bash
-claude-s
+claude
 ```
 
-That's it. Run `claude-s` instead of `claude` in each project and the status icon appears in your menu bar.
+That's it: every session shows up in the menu bar. The plugin loads straight from this folder, so `git pull` updates it.
 
 > Keep the folder in your home directory, not in `~/Documents`, `~/Desktop` or `~/Downloads`. macOS can stop apps like IDE terminals from reading those folders, and sessions started there won't show up.
 
@@ -142,7 +147,7 @@ If a click doesn't switch windows, run `claude-s debug`. It shows where each ses
 
 ## The `claude-s` command
 
-`claude-s` starts Claude Code with this plugin loaded. It also starts the background service and makes sure the menu-bar icon is running. Put options before your Claude arguments. Anything after `--` is passed to `claude` unchanged.
+`claude-s` holds the helper commands: status, keep-awake, diagnostics. You can also start sessions with it: it starts the background service and the menu-bar icon, then runs `claude`, adding the plugin only if it isn't installed in Claude Code. Put options before your Claude arguments; anything after `--` is passed to `claude` unchanged.
 
 | Command | What it does |
 |---|---|
@@ -173,17 +178,26 @@ You can combine options, for example `claude-s dashboard compact`. Add `--no-cla
 ```
 Or turn it off later by adding `export AGENT_STATUS_MENUBAR=0` to `~/.zshrc`.
 
-**Manual setup, without the installer.** Add this line to `~/.zshrc`, then open a new terminal:
+**Without installing the plugin in Claude Code:**
 ```bash
-alias claude-s='~/claude-agent-status/bin/claude-s'
+~/claude-agent-status/install.sh --no-plugin
+```
+Then start sessions with `claude-s`, which loads the plugin for that session only.
+
+**Plugin from GitHub instead of your local folder** (gets what's released on `main`; update with `claude plugin marketplace update agent-status`):
+```bash
+claude plugin marketplace add mk-quantlabs/claude-agent-status
+claude plugin install agent-status@agent-status
 ```
 
-**As a regular Claude Code plugin**, so plain `claude` loads it in every session. Run these inside Claude Code:
+**Manual setup, without the installer:**
+```bash
+claude plugin marketplace add ~/claude-agent-status
+claude plugin install agent-status@agent-status
+echo "alias claude-s='~/claude-agent-status/bin/claude-s'" >> ~/.zshrc
 ```
-/plugin marketplace add mk-quantlabs/claude-agent-status
-/plugin install agent-status@agent-status
-```
-After that, start Claude with `claude` rather than `claude-s`, or the plugin is loaded twice. You can still use `claude-s status`, `open` and the other commands that don't start Claude.
+
+**Turn the plugin off for a while:** `claude plugin disable agent-status@agent-status` (and `enable` to turn it back on).
 
 **Try it without Claude:**
 ```bash
@@ -243,7 +257,7 @@ These environment variables are read when the service starts:
 
 Run `claude-s doctor` first. It checks the setup, restarts the service, tests the macOS permissions and opens the right System Settings page for anything that's missing.
 
-- **A session doesn't show up.** Make sure it was started with `claude-s`, then send it a prompt. If it was started from an IDE terminal, check that the folder isn't in `~/Documents`, `~/Desktop` or `~/Downloads` (see Quick start).
+- **A session doesn't show up.** Check that the plugin is enabled (`claude plugin list`), or start the session with `claude-s`; then send it a prompt. If it was started from an IDE terminal, check that the folder isn't in `~/Documents`, `~/Desktop` or `~/Downloads` (see Quick start).
 - **The menu bar shows `◌`.** The service isn't running. It starts with the next `claude-s`, or run `claude-s restart`.
 - **A click doesn't switch windows.** Run `claude-s debug` and look at the ✗ step. `not authorized` or `-1743` means SwiftBar needs the Automation or Accessibility permission (see [Click to jump to the session](#click-to-jump-to-the-session)). Sessions started before an update record their window on the next prompt.
 - **Status looks wrong.** `claude-s restart` resets the service. Live sessions reappear after their next event.
@@ -256,6 +270,23 @@ Run `claude-s doctor` first. It checks the setup, restarts the service, tests th
 - JetBrains support is in beta: with several projects open, the click may not always land on the right project.
 - In JetBrains IDEs and VS Code, a click switches to the right project window, but it can't select a specific terminal tab inside the IDE. For exact-tab jumps, run sessions in iTerm2, Terminal or tmux.
 - The menu bar and desktop widget are macOS-only. The dashboard, terminal view and tmux focus also work on Linux.
+
+## FAQ
+
+**Do agents keep running when I lock my Mac?**
+Yes. Locking never stops them; sleep does. While an agent works, Agent Status keeps the Mac from idle sleep, so you can lock it and walk away. Closing the lid on battery still sleeps the Mac.
+
+**Can I approve a request from the menu bar?**
+No, by design. A click only takes you to the session; you answer it there.
+
+**Does it drain my battery?**
+Only while agents are working, and for one minute after. `claude-s awake power` keeps the Mac awake only on the power adapter; `claude-s awake off` turns it off.
+
+**Which sessions show up?**
+Claude Code sessions running on this Mac, from any terminal or IDE, once the plugin is installed. Cloud sessions and claude.ai chats run elsewhere and can't be seen.
+
+**Do I have to use `claude-s`?**
+No. After `install.sh`, plain `claude` reports its status. `claude-s` is for the helper commands.
 
 ## Contributing
 

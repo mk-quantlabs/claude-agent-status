@@ -31,6 +31,9 @@ jobs:
           node tests/keepawake.test.js
           bash tests/keepawake.integration.sh
 
+      - name: Launcher and installer tests
+        run: bash tests/launcher.test.sh
+
       - name: Smoke test (hook -> service -> API)
         env:
           AGENT_STATUS_PORT: "4399"
