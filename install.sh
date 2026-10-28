@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Agent Status installer.
-#   ./install.sh               add the `claude-s` command + menu-bar icon (macOS)
-#   ./install.sh --no-menubar  add the `claude-s` command only
+#   ./install.sh               adds the `claude-s` command and the menu-bar icon (macOS)
+#   ./install.sh --no-menubar  adds the `claude-s` command only
 set -euo pipefail
 
 ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,7 +21,7 @@ fail() { printf '%s✗ %s%s\n' "$r" "$*" "$n" >&2; exit 1; }
 
 echo "${b}Installing Agent Status${n}  ($ROOT)"
 
-# 1. requirements
+# Requirements
 command -v node >/dev/null || fail "Node.js 18+ is required (macOS: brew install node)"
 major="$(node -p 'process.versions.node.split(".")[0]')"
 [ "$major" -ge 18 ] || fail "Node.js 18+ is required (found $(node -v))"
@@ -34,10 +34,10 @@ case "$ROOT" in
     note "from reading it, and their sessions won't show up. Moving it to ~/ is recommended." ;;
 esac
 
-# 2. permissions
+# Executable bits
 chmod +x "$ROOT/bin/claude-s" "$ROOT/uninstall.sh" "$ROOT/widgets/swiftbar/"*.sh "$ROOT/plugins/agent-status/scripts/report.js"
 
-# 3. alias in the shell rc file
+# claude-s alias in the shell config file
 shell_name="$(basename "${SHELL:-zsh}")"
 case "$shell_name" in
   zsh)  rc="$HOME/.zshrc" ;;
@@ -58,7 +58,7 @@ else
   echo "    $line"
 fi
 
-# 4. menu-bar icon (macOS)
+# Menu-bar icon (macOS)
 if [ "$MENUBAR" = 1 ] && [ "$(uname)" = "Darwin" ]; then
   "$ROOT/bin/claude-s" menubar --no-claude && ok "Menu-bar icon ready" || note "Menu-bar setup skipped (run: claude-s menubar)"
 elif [ "$MENUBAR" = 1 ]; then

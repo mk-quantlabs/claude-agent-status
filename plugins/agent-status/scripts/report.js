@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-// Claude Code hook -> agent-status daemon.
-// Reads the hook payload from stdin, trims it to what the board needs and POSTs it
-// to the local daemon. Starts the daemon if it isn't running. Never blocks Claude:
-// always exits 0, hard deadline ~1.5s, prints nothing.
+// Claude Code hook: reads the hook payload from stdin, reduces it to the fields the board
+// uses and POSTs it to the local service, starting the service if it isn't running.
+// Exits 0 within ~1.5s and prints nothing.
 'use strict';
 const http = require('http');
 const path = require('path');
@@ -36,12 +35,11 @@ function ttyOfSelf() {
   } catch { return undefined; }
 }
 
-// Walk up the process tree once (single `ps` call) to find:
-//  - pid:     the Claude Code process (first ancestor that isn't a shell). The daemon uses it
-//             to drop sessions whose process is gone (closed tab, Ctrl+C, crash).
-//  - hostApp: the GUI app the session really runs in (iTerm, PyCharm, Rider, VS Code, ...),
-//             found from the process tree rather than env vars, which IDEs often inherit
-//             from whatever terminal launched them.
+// Walks the process tree (one `ps` call) and returns:
+//  - pid:     the Claude Code process (first ancestor that isn't a shell)
+//  - hostApp: the .app bundle the session runs in (iTerm, PyCharm, VS Code, ...)
+//  - hostPid: the main process of that app
+//  - inTmux:  true when the session runs inside tmux
 const SHELLS = /^-?(sh|bash|zsh|dash|fish|ksh|login)$/;
 function processInfo() {
   const out = {};
@@ -59,13 +57,12 @@ function processInfo() {
       if (!out.pid && !SHELLS.test(path.basename(p.comm))) out.pid = pid;
       const app = p.comm.match(/^(\/.*?\.app)\/Contents\//);
       if (app) {
-        // Helpers (e.g. "Code Helper") live inside the main bundle: climb to the topmost
-        // process of the same app, which is the one that owns the windows.
+        // Topmost process of the same bundle (the app's main process).
         out.hostApp = app[1]; out.hostPid = pid;
         for (let q = procs.get(p.ppid), qpid = p.ppid; q && q.comm.startsWith(app[1] + '/'); qpid = q.ppid, q = procs.get(q.ppid)) out.hostPid = qpid;
         break;
       }
-      if (/iTermServer/.test(p.comm)) { out.hostApp = 'iTerm2'; break; } // iTerm's detached session server
+      if (/iTermServer/.test(p.comm)) { out.hostApp = 'iTerm2'; break; } // iTerm2 session server
       if (/(^|\/)tmux/.test(path.basename(p.comm))) { out.inTmux = true; break; }
       pid = p.ppid;
     }
@@ -73,11 +70,35 @@ function processInfo() {
   return out;
 }
 
-// Where does this session live? Captured on SessionStart / UserPromptSubmit only.
-function location() {
+// Folders containing `cwd` that have an `.idea` directory (JetBrains project roots), nearest
+// first. The project named by the IDE terminal's history-file variable, if present, is first.
+function jetbrainsProject(cwd) {
+  if (!cwd) return undefined;
+  const fs = require('fs');
+  const hist = process.env.__INTELLIJ_COMMAND_HISTFILE__ || '';
+  const m = path.basename(hist).match(/^(.+?)-history/);
+  const hint = m ? m[1] : null;
+  const home = require('os').homedir();
+  const found = [];
+  let dir = cwd;
+  for (let i = 0; i < 8 && dir && dir !== '/' && dir !== home; i++) {
+    try { if (fs.statSync(path.join(dir, '.idea')).isDirectory()) found.push(dir); } catch { /* none */ }
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  if (hint) { const i = found.findIndex((d) => path.basename(d) === hint); if (i > 0) found.unshift(...found.splice(i, 1)); }
+  return found.length ? found : undefined;
+}
+
+// Location of the session: process, host app, terminal and IDE details.
+// Collected on SessionStart and UserPromptSubmit.
+function location(cwd) {
   const e = process.env;
   const pi = processInfo();
+  const inJetBrains = /JetBrains/i.test(e.TERMINAL_EMULATOR || '');
   return {
+    ideProjects: inJetBrains ? jetbrainsProject(cwd) : undefined,
     pid: pi.pid,
     hostApp: pi.hostApp,
     hostPid: pi.hostPid,
@@ -105,8 +126,8 @@ function build(h) {
     ts: Date.now(),
   };
   switch (ev) {
-    case 'SessionStart': out.source = h.source; out.loc = location(); break;
-    case 'UserPromptSubmit': out.prompt = clip(h.prompt, 160); out.loc = location(); break;
+    case 'SessionStart': out.source = h.source; out.loc = location(out.cwd); break;
+    case 'UserPromptSubmit': out.prompt = clip(h.prompt, 160); out.loc = location(out.cwd); break;
     case 'PreToolUse': out.tool = h.tool_name; out.detail = toolSummary(h.tool_name, h.tool_input); break;
     case 'PostToolUse': out.tool = h.tool_name; break;
     case 'PostToolUseFailure':

@@ -25,7 +25,8 @@ bin/claude-s               # starts Claude with the plugin from this folder
 | `plugins/agent-status/hooks/hooks.json` | Which Claude Code events are reported |
 | `plugins/agent-status/scripts/report.js` | The hook: reads the event, posts it to the local service |
 | `plugins/agent-status/server/server.js` | Local service: status logic, API, live stream |
-| `plugins/agent-status/server/focus.js` | Click-to-focus for each terminal / IDE |
+| `plugins/agent-status/server/focus.js` | Click-to-focus for each terminal / IDE, with a step-by-step trace |
+| `plugins/agent-status/server/focus-cli.js` | Runs a click from the calling app (menu bar, `claude-s focus`) |
 | `plugins/agent-status/server/public/index.html` | Web dashboard (single file, no build step) |
 | `widgets/` | Menu bar (SwiftBar) and desktop (Übersicht) widgets |
 | `bin/claude-s` | Launcher and helper commands |
@@ -36,14 +37,15 @@ There are no dependencies and no build step. Please keep it that way unless ther
 
 ```bash
 find . -name '*.js' -not -path './node_modules/*' -exec node --check {} \;
+node tests/navigation.test.js       # window / tab matching for every supported layout
 bash -n bin/claude-s install.sh uninstall.sh
 claude plugin validate .            # if you have Claude Code installed
 ```
 
 - Keep changes focused; one feature or fix per PR.
-- If you add support for a new terminal or IDE in `focus.js`, mention in the PR which app and OS you tested on.
+- If you add support for a new terminal or IDE in `focus.js`, add its window-title style to `tests/navigation.test.js` and mention in the PR which app and OS you tested on.
 - Update `README.md` and `CHANGELOG.md` when behaviour changes.
 
 ## Reporting bugs
 
-Open an issue with your OS, terminal or IDE, Node version, and the output of `claude-s status` and `curl -s http://127.0.0.1:4317/health`.
+Open an issue with your OS, terminal or IDE, Node version, and the output of `claude-s debug`.

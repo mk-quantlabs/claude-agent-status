@@ -30,5 +30,5 @@ body:
   - type: textarea
     id: status
     attributes:
-      label: Output of `claude-s status` and `curl -s http://127.0.0.1:4317/health`
+      label: Output of `claude-s debug`
       render: shell

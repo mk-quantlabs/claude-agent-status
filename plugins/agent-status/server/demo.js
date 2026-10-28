@@ -1,5 +1,4 @@
-// `node server.js --demo` — fake agents cycling through states, to try the board
-// (or a widget) without running Claude Code.
+// Demo mode (`node server.js --demo`): simulated agents that change status every few seconds.
 'use strict';
 const PROJECTS = [
   ['app-1', 'Add pagination to the list endpoint'],
@@ -23,7 +22,7 @@ function start(apply, broadcast) {
     emit(i, 'SessionStart', { source: 'startup', loc: { termProgram: 'iTerm.app', bundleId: 'com.googlecode.iterm2' } });
     emit(i, 'UserPromptSubmit', { prompt: p[1] });
   });
-  // a varied starting picture
+  // Initial status of each simulated agent.
   emit(0, 'PreToolUse', { tool: 'Bash', detail: 'Bash: npm test -- list' });
   emit(1, 'PostToolUseFailure', { tool: 'Bash', error: 'AssertionError: expected 2024-01-31' });
   emit(1, 'PostToolUseFailure', { tool: 'Bash', error: 'AssertionError: expected 2024-01-31' });
@@ -32,7 +31,7 @@ function start(apply, broadcast) {
   emit(4, 'Stop');
   emit(5, 'Notification', { notification_type: 'idle_prompt', message: 'Claude is waiting for your input' });
 
-  if (process.env.AGENT_STATUS_DEMO_STATIC) { broadcast(); return; } // frozen picture (screenshots)
+  if (process.env.AGENT_STATUS_DEMO_STATIC) { broadcast(); return; } // static demo: no further changes
   setInterval(() => {
     const i = Math.floor(Math.random() * ids.length);
     const r = Math.random();

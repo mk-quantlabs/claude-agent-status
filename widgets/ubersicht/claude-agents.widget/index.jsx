@@ -1,4 +1,4 @@
-// Übersicht desktop widget: live Claude agent statuses, click a row to jump to its window.
+// Übersicht desktop widget: lists agents and their status; a click focuses the agent's window.
 // Install: copy the "claude-agents.widget" folder into
 //   ~/Library/Application Support/Übersicht/widgets/
 import { css, run } from "uebersicht";
@@ -7,7 +7,7 @@ const API = "http://127.0.0.1:4317";
 export const command = `curl -s --max-time 1 ${API}/api/agents`;
 export const refreshFrequency = 2000;
 
-// Position on the desktop: change top/right to taste.
+// Position on the desktop (top / right).
 export const className = `
   top: 40px;
   right: 24px;

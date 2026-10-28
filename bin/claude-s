@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# claude-s — Claude Code with the Agent Status board.
+# claude-s: starts Claude Code with the Agent Status plugin and provides helper commands.
 #
-#   claude-s                      start Claude with the plugin (daemon + menu-bar icon set up for you)
-#   claude-s dashboard compact    also open the dashboard + small window
-#   claude-s status               print the board in the terminal (doesn't start Claude)
-#   claude-s help                 all commands
+#   claude-s                      start Claude with the plugin; starts the service and menu-bar icon
+#   claude-s dashboard compact    also open the dashboard and the compact window
+#   claude-s status               print the board in the terminal without starting Claude
+#   claude-s help                 list all commands
 #
-# Action words come first; anything else (or everything after "--") is passed to claude.
-# Set AGENT_STATUS_MENUBAR=0 to skip the default menu-bar setup.
+# Leading action words are handled here; remaining arguments (and everything after "--")
+# are passed to claude. AGENT_STATUS_MENUBAR=0 disables the menu-bar setup.
 set -euo pipefail
 
-# ---------- locate ourselves (follows symlinks) ----------
+# ---------- install location (resolves symlinks) ----------
 src="${BASH_SOURCE[0]}"
 while [ -L "$src" ]; do
   dir="$(cd -P "$(dirname "$src")" && pwd)"; src="$(readlink "$src")"
@@ -27,15 +27,31 @@ warn() { printf '%s▸ %s%s\n' "$c_r" "$*" "$c_0" >&2; }
 is_mac() { [ "$(uname)" = "Darwin" ]; }
 need_mac() { is_mac || { warn "'$1' works on macOS only"; return 1; }; }
 
-# ---------- daemon ----------
+# ---------- service ----------
 daemon_up() { curl -s --max-time 1 "$URL/health" >/dev/null 2>&1; }
 ensure_daemon() {
   daemon_up && return 0
-  nohup node "$PLUGIN/server/server.js" >/dev/null 2>&1 &
+  # Starts the service as a detached process in its own session.
+  node -e 'require("child_process").spawn(process.execPath, [process.argv[1]], { detached: true, stdio: "ignore" }).unref()' "$PLUGIN/server/server.js"
   for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 0.2; daemon_up && return 0; done
   warn "agent-status daemon did not start (is node installed?)"; return 1
 }
-stop_daemon() { pkill -f "agent-status/server/server.js" 2>/dev/null && say "daemon stopped" || say "daemon was not running"; }
+# Stops the service: by the pid it reports, else by the process listening on the port,
+# else by its command line.
+daemon_pid() { { curl -s --max-time 1 "$URL/health" 2>/dev/null || true; } | node -e 'try{const p=JSON.parse(require("fs").readFileSync(0,"utf8")).pid;if(p)process.stdout.write(String(p))}catch{}' || true; }
+kill_daemon() {
+  local pid; pid="$(daemon_pid)"
+  if [ -n "$pid" ]; then kill "$pid" 2>/dev/null; for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$pid" 2>/dev/null || return 0; sleep 0.1; done; return 0; fi
+  # Process listening on the port whose command line is the service script.
+  if command -v lsof >/dev/null; then
+    for pid in $(lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null || true); do
+      ps -o command= -p "$pid" 2>/dev/null | grep -q "server/server\.js" && kill "$pid" 2>/dev/null
+    done
+  fi
+  pkill -f "node[^ ]* [^ ]*agent-status/server/server\.js" 2>/dev/null || true
+  sleep 0.2
+}
+stop_daemon() { if daemon_up; then kill_daemon; say "daemon stopped"; else kill_daemon; say "daemon was not running"; fi; }
 
 # ---------- actions ----------
 open_url() { if is_mac; then open "$1"; else xdg-open "$1" >/dev/null 2>&1 || echo "$1"; fi; }
@@ -57,7 +73,7 @@ act_compact() {
 
 menubar_dir() { defaults read com.ameba.SwiftBar PluginDirectory 2>/dev/null || true; }
 
-# Default on macOS: make sure the menu-bar icon exists and SwiftBar runs. Cheap when already set up.
+# On macOS: installs the menu-bar icon if missing and starts SwiftBar if it isn't running.
 ensure_menubar() {
   is_mac || return 0
   [ "${AGENT_STATUS_MENUBAR:-1}" = "0" ] && return 0
@@ -121,8 +137,82 @@ act_status() {
 
 act_focus() {
   local n="${1:-}"
-  [[ "$n" =~ ^[0-9]+$ ]] || { warn "usage: claude-s focus <slot>"; return 1; }
-  curl -s -X POST -H 'Content-Type: application/json' "$URL/api/slot/$n/focus"; echo
+  [[ "$n" =~ ^[A-Za-z0-9_-]+$ ]] || { warn "usage: claude-s focus <slot>"; return 1; }
+  node "$PLUGIN/server/focus-cli.js" "$n" cli || true
+}
+
+# Prints each session's recorded location and the steps of the most recent clicks.
+act_debug() {
+  if ! daemon_up; then warn "service not running (claude-s restart)"; return 0; fi
+  echo "${c_b}Sessions and where they run${c_0}"
+  curl -s --max-time 2 "$URL/api/agents" | node -e '
+    const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
+    const http = require("http");
+    const get = (id) => new Promise((r) => http.get({ host: "127.0.0.1", port: process.argv[1], path: "/api/agents/" + id }, (res) => { let b = ""; res.on("data", (c) => b += c); res.on("end", () => r(JSON.parse(b))); }).on("error", () => r({})));
+    (async () => {
+      if (!d.agents.length) console.log("  (none)");
+      for (const s of d.agents) {
+        const a = await get(s.id); const l = a.loc || {};
+        console.log(`  ${s.slot}. ${s.project}  [${s.status}]  ${a.cwd || ""}`);
+        if (!a.loc) { console.log("     no location recorded yet: send this session a prompt"); continue; }
+        console.log(`     app: ${l.hostApp || "?"}  (pid ${l.hostPid || "-"})   claude pid: ${l.pid || "-"}`);
+        if (l.itermSession) console.log(`     iTerm session: ${l.itermSession}`);
+        if (l.tty) console.log(`     tty: ${l.tty}`);
+        if (l.tmuxPane) console.log(`     tmux pane: ${l.tmuxPane}`);
+        if (l.terminalEmulator) console.log(`     terminal: ${l.terminalEmulator}`);
+        if (l.ideProjects) console.log(`     IDE project candidates: ${l.ideProjects.join(", ")}`);
+      }
+    })();' "$PORT"
+  echo
+  echo "${c_b}Last clicks${c_0}"
+  local log="${AGENT_STATUS_DIR:-$HOME/.claude/agent-status}/focus.log"
+  if [ ! -s "$log" ]; then echo "  (no clicks recorded yet: click an agent in the menu bar, then run claude-s debug again)"; return 0; fi
+  tail -n 6 "$log" | node -e '
+    for (const line of require("fs").readFileSync(0, "utf8").split("\n").filter(Boolean)) {
+      const e = JSON.parse(line);
+      console.log(`  ${e.ts.replace("T", " ").slice(0, 19)}  via ${e.via}  ${e.project}: ${e.ok ? "✓" : "✗"} ${e.method}`);
+      for (const t of e.trace || []) console.log(`     ${t.ok ? "✓" : "✗"} ${t.step}${t.out ? " → " + t.out : ""}${t.error ? "  [" + t.error + "]" : ""}`);
+    }'
+}
+
+act_doctor() {
+  local ok="${c_g}✓${c_0}" bad="${c_r}✗${c_0}" warn="${c_b}!${c_0}" fails=0
+  echo "${c_b}Agent Status doctor${c_0}"
+  echo
+  if command -v node >/dev/null; then echo "$ok Node $(node -v)"; else echo "$bad Node.js not found (brew install node)"; fails=1; fi
+  if command -v claude >/dev/null; then echo "$ok Claude Code found"; else echo "$bad Claude Code not found on PATH"; fails=1; fi
+  echo "$ok claude-s: $ROOT/bin/claude-s"
+
+  # Restarts the service.
+  kill_daemon; sleep 0.2
+  if ensure_daemon; then echo "$ok Service running on $URL/"; else fails=1; fi
+
+  if is_mac; then
+    local dir; dir="$(menubar_dir)"
+    if [ ! -d "/Applications/SwiftBar.app" ]; then echo "$warn Menu bar: SwiftBar not installed (run: claude-s menubar --no-claude)"
+    elif [ -z "$dir" ] || [ ! -f "$dir/claude-agents.3s.sh" ]; then echo "$warn Menu bar: icon not installed (run: claude-s menubar --no-claude)"
+    else pgrep -xq SwiftBar || open -ga SwiftBar; echo "$ok Menu bar icon installed ($dir)"; fi
+  fi
+
+  echo; echo "${c_b}Agents${c_0}"; act_status | sed 's/^/  /'
+
+  if is_mac; then
+    echo; echo "${c_b}Permissions${c_0}"
+    echo "  Menu-bar clicks run as ${c_b}SwiftBar${c_0}. On the first click macOS asks to let SwiftBar control"
+    echo "  iTerm / Terminal / System Events: click ${c_b}OK${c_0}. For IDE windows (PyCharm, Rider, VS Code…),"
+    echo "  also turn on SwiftBar in System Settings → Privacy & Security → ${c_b}Accessibility${c_0}."
+    echo "  If a click still does nothing, run ${c_b}claude-s debug${c_0}: it shows the exact error."
+    local res acc
+    res="$(curl -s --max-time 20 "$URL/api/doctor" || true)"
+    case "$res" in *automation*) ;; *) echo "$bad The service on port $PORT is an old version or not responding. Run: claude-s restart"; return 0;; esac
+    acc="$(printf '%s' "$res" | node -e 'try{const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(d.automation==="ok"&&d.accessibility==="ok"?"ok":(d.automation!=="ok"?d.automation:d.accessibility))}catch{}')"
+    if [ "$acc" = "ok" ]; then echo "$ok Dashboard clicks: permissions OK"
+    else echo "$warn Dashboard clicks may not switch windows ($acc). Menu-bar clicks are not affected."; fi
+  fi
+
+  echo
+  if [ "$fails" = 0 ]; then echo "${c_g}All good.${c_0} Click an agent in the menu bar to jump to it."
+  else echo "Fix the ${c_r}✗${c_0} items above, then run ${c_b}claude-s doctor${c_0} again."; fi
 }
 
 usage() {
@@ -141,8 +231,10 @@ ${c_b}Without starting Claude${c_0}:
   claude-s status              board in the terminal
   claude-s focus 3             jump to agent in slot 3
   claude-s open                open the dashboard only
+  claude-s doctor              check setup and macOS permissions
+  claude-s debug               where each session runs + what the last clicks did (exact errors)
   claude-s restart | stop      restart / stop the daemon
-  claude-s menubar             (re)install the menu-bar icon
+  claude-s menubar --no-claude (re)install the menu-bar icon
   claude-s demo                demo board with fake agents (stops the real daemon)
   claude-s help
 
@@ -150,7 +242,7 @@ Dashboard: $URL/
 EOF
 }
 
-# ---------- parse ----------
+# ---------- argument parsing ----------
 actions=(); standalone=""; focus_arg=""; no_claude=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -164,6 +256,8 @@ while [ $# -gt 0 ]; do
     focus)                   standalone=focus; shift; focus_arg="${1:-}" ;;
     stop)                    standalone=stop ;;
     restart)                 standalone=restart ;;
+    doctor|check)            standalone=doctor ;;
+    debug|why)               standalone=debug ;;
     demo)                    standalone=demo ;;
     help|-h|--help)          usage; exit 0 ;;
     --)                      shift; break ;;
@@ -177,6 +271,8 @@ case "$standalone" in
   open)    act_dashboard; exit 0 ;;
   focus)   act_focus "$focus_arg"; exit 0 ;;
   stop)    stop_daemon; exit 0 ;;
+  doctor)  act_doctor; exit 0 ;;
+  debug)   act_debug; exit 0 ;;
   restart) stop_daemon; sleep 0.3; ensure_daemon && say "daemon running on $URL/"; exit 0 ;;
   demo)    stop_daemon; say "demo on $URL/  (Ctrl+C to stop)"; exec node "$PLUGIN/server/server.js" --demo ;;
 esac

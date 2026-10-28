@@ -1,20 +1,20 @@
 #!/usr/bin/env node
-// agent-status daemon: collects hook events from every Claude Code session and
-// serves the board (web dashboard, JSON/SSE API, Stream Deck key images,
-// SwiftBar menu). Binds to 127.0.0.1 only. Zero dependencies.
+// Agent Status service: receives hook events from Claude Code sessions, keeps the status of
+// each session and serves the web dashboard, the JSON/SSE API, key images and the SwiftBar
+// menu. Listens on 127.0.0.1.
 'use strict';
 const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { focus, appName } = require('./focus');
+const { focus, logAttempt, appName, doctor } = require('./focus');
 
 const PORT = Number(process.env.AGENT_STATUS_PORT) || 4317;
 const HOST = '127.0.0.1';
 const STATE_DIR = process.env.AGENT_STATUS_DIR || path.join(os.homedir(), '.claude', 'agent-status');
 const STATE_FILE = path.join(STATE_DIR, 'state.json');
 const STALL_MS = (Number(process.env.AGENT_STATUS_STALL_MIN) || 3) * 60e3;   // in_progress -> sleeping
-const FORGET_MS = 6 * 3600e3;                                                  // fallback when no PID is known
+const FORGET_MS = 6 * 3600e3;                                                  // sessions without a PID are dropped after this
 const RETRY_AFTER = 2;                                                         // consecutive tool failures
 const DEMO = process.argv.includes('--demo');
 
@@ -28,8 +28,7 @@ const COLOR = {
   sleeping: '#8B8FA3', done: '#2FBF71',
 };
 
-// Is the Claude Code process behind this session still running?
-// true = alive, false = gone, null = unknown (no PID recorded).
+// Whether the session's Claude Code process is running: true, false, or null (no PID recorded).
 function alive(a) {
   const pid = a.loc && Number(a.loc.pid);
   if (!Number.isInteger(pid) || pid <= 1) return null;
@@ -44,10 +43,22 @@ function load() {
   if (DEMO) return;
   try {
     const arr = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-    // Only bring back sessions whose Claude process is still running.
+    // Restores sessions whose Claude Code process is still running.
     for (const a of arr) if (a && a.id && alive(a) === true) agents.set(a.id, a);
-  } catch { /* first run */ }
+  } catch { /* no saved state */ }
 }
+function saveNow() {
+  if (DEMO) return;
+  try {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    fs.writeFileSync(STATE_FILE + '.tmp', JSON.stringify([...agents.values()]));
+    fs.renameSync(STATE_FILE + '.tmp', STATE_FILE);
+  } catch { /* ignore */ }
+}
+// SIGTERM: save state and exit. SIGHUP: ignored.
+process.on('SIGTERM', () => { saveNow(); process.exit(0); });
+if (!DEMO) process.on('SIGHUP', () => {});
+
 let saveTimer = null;
 function save() {
   if (DEMO) return;
@@ -168,7 +179,7 @@ function apply(ev) {
   return true;
 }
 
-// Time-based transitions: stalled work -> sleeping, cleanup.
+// Periodic update: idle in-progress sessions become sleeping; ended or stale sessions are removed.
 function tick() {
   const now = Date.now();
   let changed = false;
@@ -208,7 +219,7 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-// 144x144 key image for Stream Deck (or anything that wants a tile).
+// 144x144 SVG key image for a slot.
 function keySvg(a, slot) {
   if (!a) {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" fill="#111216"/><text x="72" y="80" font-family="Helvetica,Arial" font-size="18" fill="#3a3c45" text-anchor="middle">${slot}</text></svg>`;
@@ -226,7 +237,7 @@ function keySvg(a, slot) {
 </svg>`;
 }
 
-// SwiftBar / xbar menu-bar format.
+// Menu in SwiftBar / xbar format: one row per agent; a click runs focus-cli.js.
 function swiftbar() {
   const s = snapshot();
   const c = s.counts;
@@ -237,13 +248,10 @@ function swiftbar() {
   const lines = [`${head} | font=Menlo size=12`, '---'];
   const DOT = { waiting: '🟠', retry: '🔴', in_progress: '🔵', sleeping: '⚪️', done: '🟢' };
   for (const a of s.agents) {
-    const url = `http://${HOST}:${PORT}/api/agents/${a.id}/focus`;
-    const click = `bash=/usr/bin/curl param1=-s param2=-X param3=POST param4=-H param5=Content-Type:application/json param6=${url} terminal=false refresh=true`;
+    const click = `bash="${process.execPath}" param1="${FOCUS_CLI}" param2=${a.id} param3=menubar terminal=false refresh=true`;
     const txt = `${DOT[a.status] || '•'} ${a.slot}. ${a.project} — ${a.label}`.replace(/\|/g, '/');
     const tip = [a.detail, a.terminal].filter(Boolean).join(' · ').replace(/\|/g, '/').replace(/"/g, "'").slice(0, 160);
     lines.push(`${txt} | ${click}${tip ? ` tooltip="${tip}"` : ''}`);
-    // Detail as a plain, non-clickable grey line: one agent = one clickable row.
-    if (a.detail) lines.push(`      ${a.detail.replace(/\|/g, '/').slice(0, 70)} | size=11 color=#8B8FA3 disabled=true`);
   }
   if (!s.agents.length) lines.push('No agents');
   lines.push('---', `Open dashboard | href=http://${HOST}:${PORT}/`);
@@ -264,6 +272,7 @@ function broadcast() {
 
 // ---------- HTTP ----------
 const PUBLIC = path.join(__dirname, 'public');
+const FOCUS_CLI = path.join(__dirname, 'focus-cli.js');
 
 function send(res, code, body, type = 'application/json; charset=utf-8') {
   const buf = Buffer.isBuffer(body) ? body : Buffer.from(typeof body === 'string' ? body : JSON.stringify(body));
@@ -281,7 +290,7 @@ function readBody(req, limit = 64 * 1024) {
 }
 
 const server = http.createServer(async (req, res) => {
-  // DNS-rebinding guard: only answer to localhost names.
+  // Accepts only localhost Host headers.
   const host = String(req.headers.host || '').replace(/:\d+$/, '');
   if (!['127.0.0.1', 'localhost', '[::1]'].includes(host)) return send(res, 403, { error: 'forbidden host' });
 
@@ -289,7 +298,7 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
 
   if (req.method === 'POST') {
-    // JSON content type forces a CORS preflight from browsers, which we never approve.
+    // POST bodies must be JSON (application/json).
     if (!/application\/json/.test(req.headers['content-type'] || '')) return send(res, 415, { error: 'json only' });
     let body = {};
     try { const t = await readBody(req); body = t ? JSON.parse(t) : {}; } catch { return send(res, 400, { error: 'bad json' }); }
@@ -301,12 +310,15 @@ const server = http.createServer(async (req, res) => {
       const a = agents.get(m[1]);
       if (!a) return send(res, 404, { error: 'unknown agent' });
       if (m[2] === 'dismiss') { agents.delete(a.id); broadcast(); return send(res, 200, { ok: true }); }
-      return send(res, 200, await focus(a));
+      const r = await focus(a); logAttempt(a, r, 'dashboard');
+      return send(res, 200, r);
     }
     m = p.match(/^\/api\/slot\/(\d+)\/focus$/);
     if (m) {
       const a = [...agents.values()].find((x) => x.slot === Number(m[1]));
-      return a ? send(res, 200, await focus(a)) : send(res, 404, { error: 'empty slot' });
+      if (!a) return send(res, 404, { error: 'empty slot' });
+      const r = await focus(a); logAttempt(a, r, 'api');
+      return send(res, 200, r);
     }
     if (p === '/api/clear') {
       const which = new Set(body.statuses || ['done']);
@@ -319,8 +331,9 @@ const server = http.createServer(async (req, res) => {
   if (req.method !== 'GET') return send(res, 405, { error: 'method' });
 
   if (p === '/' || p === '/index.html') return send(res, 200, fs.readFileSync(path.join(PUBLIC, 'index.html')), 'text/html; charset=utf-8');
-  if (p === '/health') return send(res, 200, { ok: true, agents: agents.size, demo: DEMO });
+  if (p === '/health') return send(res, 200, { ok: true, agents: agents.size, demo: DEMO, pid: process.pid });
   if (p === '/api/agents') return send(res, 200, snapshot());
+  if (p === '/api/doctor') return send(res, 200, { ...(await doctor()), pid: process.pid, ppid: process.ppid });
   if (p === '/api/swiftbar') return send(res, 200, swiftbar(), 'text/plain; charset=utf-8');
   if (p === '/api/stream') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
@@ -329,7 +342,11 @@ const server = http.createServer(async (req, res) => {
     req.on('close', () => clients.delete(res));
     return;
   }
-  let m = p.match(/^\/api\/slot\/(\d+)(\.svg)?$/);
+  let m = p.match(/^\/api\/agents\/([\w-]+)$/);
+  if (m) { const a = agents.get(m[1]); return a ? send(res, 200, a) : send(res, 404, { error: 'unknown agent' }); }
+  m = p.match(/^\/api\/slot\/(\d+)\/raw$/);
+  if (m) { const a = [...agents.values()].find((x) => x.slot === Number(m[1])); return a ? send(res, 200, a) : send(res, 404, { error: 'empty slot' }); }
+  m = p.match(/^\/api\/slot\/(\d+)(\.svg)?$/);
   if (m) {
     const slot = Number(m[1]);
     const a = [...agents.values()].find((x) => x.slot === slot);
@@ -343,7 +360,7 @@ setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 20e3)
 setInterval(tick, 5e3).unref();
 
 server.on('error', (e) => {
-  if (e.code === 'EADDRINUSE') process.exit(0); // another daemon already serves
+  if (e.code === 'EADDRINUSE') process.exit(0); // port already served by a running instance
   console.error(e); process.exit(1);
 });
 

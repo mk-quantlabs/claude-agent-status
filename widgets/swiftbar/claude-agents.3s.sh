@@ -4,8 +4,8 @@
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 #
-# Menu-bar widget for SwiftBar (or xbar). The daemon renders the menu itself;
-# this script only fetches it. Refreshes every 3s (from the file name).
+# SwiftBar / xbar plugin: prints the menu served by the Agent Status service.
+# The "3s" in the file name sets the refresh interval.
 out=$(curl -s --max-time 1 "http://127.0.0.1:${AGENT_STATUS_PORT:-4317}/api/swiftbar")
 if [ -z "$out" ]; then
   echo "◌ | font=Menlo size=12"

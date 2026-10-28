@@ -58,7 +58,7 @@ Sessions disappear from the board as soon as their Claude process exits. Agents 
 
 ### Menu bar (default)
 
-Counts sit in the menu bar: ⚠ needs input, ↻ retry, ● in progress, ✓ done. Click an agent to jump to it. `install.sh` sets this up using the free [SwiftBar](https://swiftbar.app) app.
+Counts sit in the menu bar: ⚠ needs input, ↻ retry, ● in progress, ✓ done. Each agent is one row: hover it for details, click it to jump to it. `install.sh` sets this up using the free [SwiftBar](https://swiftbar.app) app.
 
 <img src="docs/images/menubar.png" width="640" alt="Menu-bar dropdown listing agents with colored status dots">
 
@@ -94,23 +94,25 @@ Each agent gets a stable slot number, and the daemon serves a ready-made key ima
 
 ## Click to jump to the session
 
-A click only brings the session's existing window to the front. It never opens a project, a folder or a new window.
+A click only brings the session's existing window to the front. It never opens or launches anything: no project, folder, window or app.
 
 | Where the session runs | What a click does |
 |---|---|
 | **iTerm2** | Focuses the exact tab or split |
 | **Terminal.app** | Focuses the exact tab |
 | **tmux** (any terminal) | Switches to the exact window and pane |
-| **JetBrains IDEs** (Rider, PyCharm, IntelliJ IDEA, WebStorm, GoLand…) | Raises that project's window |
+| **JetBrains IDEs** (Rider, PyCharm, IntelliJ IDEA, WebStorm, GoLand…) | Brings up the project the session belongs to, whether projects are separate windows or tabs of one window |
 | **VS Code, Cursor, Windsurf** | Raises that project's window |
 | **WezTerm, kitty** | Focuses the pane or window, if the app's CLI is available |
 | Ghostty, Warp, others | Raises the project's window, or brings the app to the front |
 
 The app is detected from the process tree, so it works even when an IDE was launched from a terminal.
 
-**macOS permissions** (asked once, on the first click):
-- **Automation**: allow control of iTerm2, Terminal or System Events.
-- **Accessibility**, for IDEs only: needed to pick the right project window when several are open. Without it, the IDE still comes to the front. To grant it, go to System Settings → Privacy & Security → Accessibility.
+**macOS permissions.** Menu-bar clicks run inside SwiftBar, so the permissions belong to SwiftBar, whichever terminal your sessions run in:
+- **Automation**: on the first click, macOS asks to let SwiftBar control iTerm2, Terminal or System Events. Click **OK**.
+- **Accessibility**, needed for IDEs (JetBrains, VS Code…): lets SwiftBar raise the right project window. Go to System Settings → Privacy & Security → Accessibility and turn on SwiftBar.
+
+If a click doesn't switch windows, run `claude-s debug`. It shows where each session was recorded and every step of the last clicks, with the exact error.
 
 ## The `claude-s` command
 
@@ -127,6 +129,8 @@ The app is detected from the process tree, so it works even when an IDE was laun
 | `claude-s status` | Show the board in the terminal |
 | `claude-s focus 3` | Jump to the agent in slot 3 |
 | `claude-s open` | Open the dashboard only |
+| `claude-s doctor` | Check the setup and macOS permissions |
+| `claude-s debug` | Show where each session runs and what the last clicks did, with exact errors |
 | `claude-s restart` / `stop` | Restart or stop the background service |
 | `claude-s demo` | Try the board with fake agents |
 | `claude-s help` | List all commands |
@@ -205,16 +209,18 @@ Set these in your shell environment:
 
 ## Troubleshooting
 
+Run `claude-s doctor` first. It checks the setup, restarts the service, tests the macOS permissions and opens the right System Settings page for anything that's missing.
+
 - **A session doesn't show up.** Make sure it was started with `claude-s`, then send it a prompt. If it was started from an IDE terminal, check that the folder isn't in `~/Documents`, `~/Desktop` or `~/Downloads` (see Quick start).
 - **The menu bar shows `◌`.** The service isn't running. It starts with the next `claude-s`, or run `claude-s restart`.
-- **A click doesn't switch windows.** Allow the Automation and Accessibility prompts (see [Click to jump to the session](#click-to-jump-to-the-session)). Sessions started before an update record their window on the next prompt.
+- **A click doesn't switch windows.** Run `claude-s debug` and look at the ✗ step. `not authorized` or `-1743` means SwiftBar needs the Automation or Accessibility permission (see [Click to jump to the session](#click-to-jump-to-the-session)). Sessions started before an update record their window on the next prompt.
 - **Status looks wrong.** `claude-s restart` resets the service. Live sessions reappear after their next event.
 
 ## Limitations
 
 - Shows Claude Code sessions on this computer only. Cloud sessions and claude.ai chats don't run local hooks.
 - Claude Code has no "retry" event, so **retry** is inferred from repeated tool failures.
-- In JetBrains IDEs and VS Code, a click opens the right project window but not a specific terminal tab inside it.
+- In JetBrains IDEs and VS Code, a click switches to the right project window, but it can't select a specific terminal tab inside the IDE. For exact-tab jumps, run sessions in iTerm2, Terminal or tmux.
 - The menu bar and desktop widget are macOS-only. The dashboard, terminal view and tmux focus also work on Linux.
 
 ## Contributing

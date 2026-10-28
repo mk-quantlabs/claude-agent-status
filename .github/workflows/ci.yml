@@ -23,6 +23,9 @@ jobs:
           bash -n bin/claude-s install.sh uninstall.sh widgets/swiftbar/*.sh
           for f in $(find . -name '*.json' -not -path './node_modules/*'); do node -e "JSON.parse(require('fs').readFileSync('$f'))"; done
 
+      - name: Navigation tests (which window / tab belongs to a session)
+        run: node tests/navigation.test.js
+
       - name: Smoke test (hook -> service -> API)
         env:
           AGENT_STATUS_PORT: "4399"
