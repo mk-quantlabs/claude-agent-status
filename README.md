@@ -10,6 +10,14 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/mk-quantlabs/claude-agent-status/actions/workflows/ci.yml"><img src="https://github.com/mk-quantlabs/claude-agent-status/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/mk-quantlabs/claude-agent-status/releases"><img src="https://img.shields.io/github/v/release/mk-quantlabs/claude-agent-status?sort=semver" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/mk-quantlabs/claude-agent-status" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/macOS%20%7C%20Linux-supported-informational" alt="macOS | Linux">
+  <img src="https://img.shields.io/badge/dependencies-0-brightgreen" alt="Zero dependencies">
+</p>
+
+<p align="center">
   <img src="docs/images/click-to-focus.gif" width="720" alt="Clicking an agent in the menu bar jumps to its iTerm2 tab, then to a JetBrains IDE window">
 </p>
 
@@ -205,14 +213,13 @@ Set these in your shell environment:
 
 ## Contributing
 
-Issues and pull requests are welcome. Ideas for what's next:
+Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Ideas for what's next:
 
 - A native Stream Deck plugin with live key colors
 - Precise tab focus for Ghostty, Warp and IDE terminals
 - Windows support for click-to-focus
 - Desktop notifications when an agent needs input
 
-To test locally, run `bin/claude-s demo` and open http://127.0.0.1:4317. To check the manifests, run `claude plugin validate .`.
 
 ## License
 

@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Syntax
+        run: |
+          find . -name '*.js' -not -path './node_modules/*' -exec node --check {} \;
+          bash -n bin/claude-s install.sh uninstall.sh widgets/swiftbar/*.sh
+          for f in $(find . -name '*.json' -not -path './node_modules/*'); do node -e "JSON.parse(require('fs').readFileSync('$f'))"; done
+
+      - name: Smoke test (hook -> service -> API)
+        env:
+          AGENT_STATUS_PORT: "4399"
+          AGENT_STATUS_DIR: ${{ runner.temp }}/agent-status
+        run: |
+          echo '{"hook_event_name":"UserPromptSubmit","session_id":"ci-1","cwd":"'"$PWD"'","prompt":"hello"}' \
+            | node plugins/agent-status/scripts/report.js
+          sleep 1
+          curl -sf http://127.0.0.1:4399/health
+          curl -sf http://127.0.0.1:4399/api/agents | node -e '
+            const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
+            const a = d.agents.find((x) => x.id === "ci-1");
+            if (!a || a.status !== "in_progress") { console.error(JSON.stringify(d)); process.exit(1); }
+            console.log("ok:", a.project, a.status);'
+          bin/claude-s status
+          bin/claude-s stop

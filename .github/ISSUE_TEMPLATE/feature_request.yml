@@ -1,0 +1,16 @@
+name: Feature request
+description: Suggest an idea, a new display, or support for another terminal / IDE
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like?
+      description: Describe the problem or workflow, and the solution you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Your setup, screenshots, links to similar tools…

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security issue
+    url: https://github.com/mk-quantlabs/claude-agent-status/security/advisories/new
+    about: Please report vulnerabilities privately.

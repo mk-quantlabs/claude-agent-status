@@ -1,0 +1,34 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: macOS 15.3
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal or IDE
+      placeholder: iTerm2 3.5 / PyCharm 2026.2 / tmux in Ghostty
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node version (node -v)
+  - type: textarea
+    id: status
+    attributes:
+      label: Output of `claude-s status` and `curl -s http://127.0.0.1:4317/health`
+      render: shell
