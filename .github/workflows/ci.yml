@@ -26,6 +26,11 @@ jobs:
       - name: Navigation tests (which window / tab belongs to a session)
         run: node tests/navigation.test.js
 
+      - name: Keep-awake and approval tests
+        run: |
+          node tests/keepawake.test.js
+          bash tests/keepawake.integration.sh
+
       - name: Smoke test (hook -> service -> API)
         env:
           AGENT_STATUS_PORT: "4399"

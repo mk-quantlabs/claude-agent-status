@@ -105,6 +105,25 @@ body.compact .card:hover .age { visibility: visible; }
 .empty h2 { color: var(--text); font-size: 18px; margin: 0 0 8px; }
 .empty code { font-family: var(--mono); background: var(--panel); border: 1px solid var(--line); padding: 2px 6px; border-radius: 6px; }
 
+.approvals {
+  display: none; margin: 16px 20px 0; padding: 12px 14px; border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--waiting) 55%, var(--line));
+  background: color-mix(in srgb, var(--waiting) 12%, var(--panel));
+}
+.approvals.show { display: block; }
+.approvals h3 { margin: 0 0 8px; font-size: 14px; color: var(--waiting); display: flex; align-items: center; gap: 8px; }
+.approvals h3 .dot { --c: var(--waiting); }
+.ap { display: flex; gap: 10px; align-items: baseline; width: 100%; text-align: left; padding: 6px 8px; border-radius: 8px; }
+.ap:hover { background: color-mix(in srgb, var(--waiting) 14%, transparent); }
+.ap b { font-weight: 650; white-space: nowrap; }
+.ap code { font: 12.5px var(--mono); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.ap span { font: 12px var(--mono); color: var(--muted); white-space: nowrap; }
+body.compact .approvals { margin: 8px 8px 0; padding: 8px 10px; }
+body.compact .ap { flex-wrap: wrap; row-gap: 2px; }
+body.compact .ap b { flex: 1; }
+body.compact .ap code { order: 3; flex-basis: 100%; font-size: 11.5px; color: var(--muted); }
+.awake { display: none; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.awake.on { display: inline-flex; }
 .banner { display: none; margin: 16px 20px 0; padding: 10px 14px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--retry) 50%, var(--line)); background: color-mix(in srgb, var(--retry) 10%, var(--panel)); }
 .banner.show { display: block; }
 
@@ -128,11 +147,13 @@ body.compact footer { display: none; }
 <header>
   <div class="brand"><span class="live" id="live"></span>Agents <small id="total"></small></div>
   <div class="chips" id="chips"></div>
+  <span class="awake" id="awake"></span>
   <div class="tools">
     <button class="tool" id="viewBtn" title="Toggle compact view">Compact</button>
     <button class="tool" id="clearBtn" title="Hide done sessions until their next activity">Clear done</button>
   </div>
 </header>
+<section class="approvals" id="approvals" aria-live="polite"></section>
 <div class="banner" id="banner">Daemon is not reachable. It starts automatically with the next Claude Code hook, or run <code>node server/server.js</code>.</div>
 <main><div class="grid" id="grid"></div><div id="empty"></div></main>
 <footer>Click a card to jump to its window · <kbd>1</kbd>–<kbd>9</kbd> focus by slot · API: <code>/api/agents</code>, <code>/api/stream</code>, <code>/api/slot/N.svg</code></footer>
@@ -197,11 +218,41 @@ function renderGrid() {
   $('empty').innerHTML = state.agents.length ? '' : `
     <div class="empty"><h2>No agents yet</h2>
     Start a Claude Code session with the <code>agent-status</code> plugin enabled and it appears here within a second.</div>`;
-  const alerts = (state.counts.waiting || 0) + (state.counts.retry || 0);
-  document.title = alerts ? `(${alerts}) Agents` : 'Agents';
+  const approvals = (state.approvals || []).length;
+  document.title = approvals ? `(${approvals}) Approval needed · Agents` : 'Agents';
 }
 
-function render() { renderChips(); renderGrid(); }
+// Sessions waiting for a permission decision; a click focuses the session's window.
+function renderApprovals() {
+  const list = state.approvals || [];
+  const now = Date.now();
+  $('approvals').classList.toggle('show', list.length > 0);
+  $('approvals').innerHTML = list.length ? `
+    <h3><span class="dot"></span>${list.length === 1 ? '1 session needs' : list.length + ' sessions need'} your approval</h3>
+    ${list.map((a) => `<button class="ap" data-id="${esc(a.id)}" title="Go to ${esc(a.project)}">
+      <b>${a.slot}. ${esc(a.project)}</b><code>${esc(a.detail)}</code><span data-since="${a.since}">${dur(now - a.since)}</span>
+    </button>`).join('')}` : '';
+}
+
+// Keep-awake indicator in the header.
+function renderAwake() {
+  const k = state.keepAwake;
+  const on = !!(k && k.active);
+  $('awake').classList.toggle('on', on);
+  $('awake').textContent = on ? '☕ Awake' : '';
+  $('awake').title = k ? `Keep awake (${k.mode}): ${k.reason}` : '';
+}
+
+// Favicon: orange dot while approvals are pending.
+function renderFavicon() {
+  const n = (state.approvals || []).length;
+  const color = n ? '%23F5A524' : '%234C8DFF';
+  let link = document.querySelector('link[rel=icon]');
+  if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+  link.href = `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='7' fill='${color}'/></svg>`;
+}
+
+function render() { renderChips(); renderApprovals(); renderAwake(); renderFavicon(); renderGrid(); }
 
 function toast(msg) {
   const t = $('toast'); t.textContent = msg; t.classList.add('show');
@@ -226,6 +277,9 @@ $('grid').addEventListener('click', async (e) => {
 });
 $('grid').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.classList.contains('card')) focusAgent(e.target.dataset.id);
+});
+$('approvals').addEventListener('click', (e) => {
+  const b = e.target.closest('.ap'); if (b) focusAgent(b.dataset.id);
 });
 $('chips').addEventListener('click', (e) => {
   const c = e.target.closest('.chip'); if (!c) return;
@@ -253,7 +307,7 @@ function connect() {
 
 setInterval(() => {
   const now = Date.now();
-  document.querySelectorAll('.age').forEach((el) => { el.textContent = dur(now - Number(el.dataset.since)); });
+  document.querySelectorAll('.age, .ap span[data-since]').forEach((el) => { el.textContent = dur(now - Number(el.dataset.since)); });
 }, 1000);
 
 applyView();

@@ -41,21 +41,49 @@ const slot = css`font: 600 11px Menlo, monospace; color: #8B90A0; width: 14px; t
 const focus = (id) =>
   run(`curl -s -X POST -H 'Content-Type: application/json' ${API}/api/agents/${id}/focus`);
 
+const ago = (since) => {
+  const m = Math.floor((Date.now() - since) / 60000);
+  return m < 1 ? "<1m" : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60}m`;
+};
+const approvalBox = css`
+  margin: 0 0 8px; padding: 6px 4px; border-radius: 10px;
+  background: rgba(245, 165, 36, 0.12); border: 1px solid rgba(245, 165, 36, 0.45);
+`;
+const detail = css`font: 11px Menlo, monospace; color: #C9CCD6; padding: 0 8px 4px 31px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`;
+
 export const render = ({ output }) => {
   let data;
   try { data = JSON.parse(output); } catch (e) {
-    return <div className={box}><div className={head}>Claude agents</div><div style={{ padding: 8, color: "#8B90A0", fontSize: 12 }}>Daemon offline</div></div>;
+    return <div className={box}><div className={head}>Claude agents</div><div style={{ padding: 8, color: "#8B90A0", fontSize: 12 }}>Service offline</div></div>;
   }
-  const agents = data.agents.filter((a) => a.status !== "ended");
-  const alerts = (data.counts.waiting || 0) + (data.counts.retry || 0);
+  const approvals = data.approvals || [];
+  const others = data.agents.filter((a) => a.status !== "waiting");
+  const awake = data.keepAwake && data.keepAwake.active;
   return (
     <div className={box}>
       <div className={head}>
-        <span>Claude agents</span>
-        <span style={{ color: alerts ? "#F5A524" : "#8B90A0" }}>{alerts ? `${alerts} need you` : `${agents.length} running`}</span>
+        <span>Claude agents{awake ? " ☕" : ""}</span>
+        <span style={{ color: approvals.length ? "#F5A524" : "#8B90A0" }}>
+          {approvals.length ? `${approvals.length} need approval` : `${data.agents.length} running`}
+        </span>
       </div>
-      {agents.length === 0 && <div style={{ padding: 8, color: "#8B90A0", fontSize: 12 }}>No agents</div>}
-      {agents.map((a) => (
+      {approvals.length > 0 && (
+        <div className={approvalBox}>
+          {approvals.map((a) => (
+            <div key={a.id} onClick={() => focus(a.id)} style={{ cursor: "pointer" }} title={a.detail}>
+              <div className={row}>
+                <span className={slot}>{a.slot}</span>
+                <span style={{ width: 9, height: 9, borderRadius: 9, background: "#F5A524", flex: "none" }} />
+                <span className={name}>{a.project}</span>
+                <span className={label} style={{ color: "#F5A524" }}>{ago(a.since)}</span>
+              </div>
+              <div className={detail}>{a.detail}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {data.agents.length === 0 && <div style={{ padding: 8, color: "#8B90A0", fontSize: 12 }}>No agents</div>}
+      {others.map((a) => (
         <div key={a.id} className={row} onClick={() => focus(a.id)} title={a.detail}>
           <span className={slot}>{a.slot}</span>
           <span style={{ width: 9, height: 9, borderRadius: 9, background: a.color, flex: "none" }} />

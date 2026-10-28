@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+- **Keep awake while agents work**: `caffeinate` keeps the Mac from idle sleep while at least one agent works, including behind the lock screen; released one minute after work stops. Modes `always` (default), `power`, `off` via `claude-s awake`. ☕ shows while it is active.
+- **Approval alerts**: sessions waiting for permission are shown first on every surface (menu bar, dashboard, compact window, desktop widget, `claude-s status`, Stream Deck keys) with the command they want to run and how long they have waited.
+- macOS notification when a session starts waiting for approval (`claude-s notifications on|off`).
+- Settings saved in `config.json`; `GET`/`POST /api/config`.
+- The menu bar is status only: clicking a session navigates to it; nothing is ever approved from Agent Status.
+
 ## 0.1.0
 
 First public release.
