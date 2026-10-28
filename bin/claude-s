@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+# claude-s — Claude Code with the Agent Status board.
+#
+#   claude-s                      start Claude with the plugin (daemon + menu-bar icon set up for you)
+#   claude-s dashboard compact    also open the dashboard + small window
+#   claude-s status               print the board in the terminal (doesn't start Claude)
+#   claude-s help                 all commands
+#
+# Action words come first; anything else (or everything after "--") is passed to claude.
+# Set AGENT_STATUS_MENUBAR=0 to skip the default menu-bar setup.
+set -euo pipefail
+
+# ---------- locate ourselves (follows symlinks) ----------
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"; src="$(readlink "$src")"
+  [[ "$src" != /* ]] && src="$dir/$src"
+done
+ROOT="$(cd -P "$(dirname "$src")/.." && pwd)"
+PLUGIN="$ROOT/plugins/agent-status"
+PORT="${AGENT_STATUS_PORT:-4317}"
+URL="http://127.0.0.1:$PORT"
+
+c_dim=$'\e[2m'; c_b=$'\e[1m'; c_g=$'\e[32m'; c_r=$'\e[31m'; c_0=$'\e[0m'
+say()  { printf '%s▸%s %s\n' "$c_g" "$c_0" "$*"; }
+warn() { printf '%s▸ %s%s\n' "$c_r" "$*" "$c_0" >&2; }
+is_mac() { [ "$(uname)" = "Darwin" ]; }
+need_mac() { is_mac || { warn "'$1' works on macOS only"; return 1; }; }
+
+# ---------- daemon ----------
+daemon_up() { curl -s --max-time 1 "$URL/health" >/dev/null 2>&1; }
+ensure_daemon() {
+  daemon_up && return 0
+  nohup node "$PLUGIN/server/server.js" >/dev/null 2>&1 &
+  for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 0.2; daemon_up && return 0; done
+  warn "agent-status daemon did not start (is node installed?)"; return 1
+}
+stop_daemon() { pkill -f "agent-status/server/server.js" 2>/dev/null && say "daemon stopped" || say "daemon was not running"; }
+
+# ---------- actions ----------
+open_url() { if is_mac; then open "$1"; else xdg-open "$1" >/dev/null 2>&1 || echo "$1"; fi; }
+
+act_dashboard() { ensure_daemon; open_url "$URL/"; say "dashboard: $URL/"; }
+
+act_compact() {
+  ensure_daemon
+  local u="$URL/?view=compact"
+  if is_mac && [ -d "/Applications/Google Chrome.app" ]; then
+    open -na "Google Chrome" --args --app="$u" --window-size=360,460
+  elif is_mac && [ -d "/Applications/Microsoft Edge.app" ]; then
+    open -na "Microsoft Edge" --args --app="$u" --window-size=360,460
+  else
+    open_url "$u"
+  fi
+  say "compact window opened"
+}
+
+menubar_dir() { defaults read com.ameba.SwiftBar PluginDirectory 2>/dev/null || true; }
+
+# Default on macOS: make sure the menu-bar icon exists and SwiftBar runs. Cheap when already set up.
+ensure_menubar() {
+  is_mac || return 0
+  [ "${AGENT_STATUS_MENUBAR:-1}" = "0" ] && return 0
+  local dir; dir="$(menubar_dir)"
+  if [ -d "/Applications/SwiftBar.app" ] && [ -n "$dir" ] && [ -f "$dir/claude-agents.3s.sh" ]; then
+    pgrep -xq SwiftBar || open -ga SwiftBar
+    return 0
+  fi
+  act_swiftbar
+}
+
+act_swiftbar() {
+  need_mac menubar || return 0
+  if [ ! -d "/Applications/SwiftBar.app" ]; then
+    command -v brew >/dev/null || { warn "Homebrew not found — install SwiftBar from https://swiftbar.app"; return 0; }
+    say "installing SwiftBar…"; brew install --cask swiftbar
+  fi
+  local dir
+  dir="$(menubar_dir)"
+  if [ -z "$dir" ]; then
+    dir="$HOME/swiftbar-plugins"
+    defaults write com.ameba.SwiftBar PluginDirectory -string "$dir"
+  fi
+  mkdir -p "$dir"
+  cp "$ROOT/widgets/swiftbar/claude-agents.3s.sh" "$dir/"
+  chmod +x "$dir/claude-agents.3s.sh"
+  ensure_daemon
+  open -ga SwiftBar
+  open -g "swiftbar://refreshallplugins" 2>/dev/null || true
+  say "menu-bar icon installed (plugin folder: $dir)"
+}
+
+act_ubersicht() {
+  need_mac ubersicht || return 0
+  if [ ! -d "/Applications/Übersicht.app" ]; then
+    command -v brew >/dev/null || { warn "Homebrew not found — install Übersicht from https://tracesof.net/uebersicht"; return 0; }
+    say "installing Übersicht…"; brew install --cask ubersicht
+  fi
+  local dir="$HOME/Library/Application Support/Übersicht/widgets"
+  mkdir -p "$dir"
+  rm -rf "$dir/claude-agents.widget"
+  cp -R "$ROOT/widgets/ubersicht/claude-agents.widget" "$dir/"
+  ensure_daemon
+  open -a "Übersicht"
+  say "desktop widget installed"
+}
+
+act_status() {
+  if ! daemon_up; then echo "${c_dim}daemon not running — no agents${c_0}"; return 0; fi
+  curl -s --max-time 1 "$URL/api/agents" | node -e '
+    const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
+    const C = { waiting: 33, retry: 31, in_progress: 34, sleeping: 90, done: 32 };
+    const ago = (t) => { const s = Math.floor((Date.now() - t) / 1000); return s < 60 ? s + "s" : s < 3600 ? Math.floor(s/60) + "m" : Math.floor(s/3600) + "h" + Math.floor(s%3600/60) + "m"; };
+    if (!d.agents.length) { console.log("\x1b[2mno agents\x1b[0m"); process.exit(0); }
+    const w = Math.max(...d.agents.map((a) => a.project.length), 7);
+    for (const a of d.agents) {
+      const col = C[a.status] || 0;
+      console.log(`${String(a.slot).padStart(2)}  \x1b[${col}m●\x1b[0m ${a.project.padEnd(w)}  \x1b[${col}m${a.label.padEnd(11)}\x1b[0m ${ago(a.since).padStart(6)}  \x1b[2m${(a.detail || "").slice(0, 60)}\x1b[0m`);
+    }'
+}
+
+act_focus() {
+  local n="${1:-}"
+  [[ "$n" =~ ^[0-9]+$ ]] || { warn "usage: claude-s focus <slot>"; return 1; }
+  curl -s -X POST -H 'Content-Type: application/json' "$URL/api/slot/$n/focus"; echo
+}
+
+usage() {
+  cat <<EOF
+${c_b}claude-s${c_0} — Claude Code with the Agent Status board
+
+${c_b}Start Claude${c_0} (options can be combined):
+  claude-s                     Claude + plugin; daemon and menu-bar icon are set up automatically
+  claude-s dashboard           also open the dashboard in the browser
+  claude-s compact             also open the small window
+  claude-s widget              also set up the desktop widget (one-time, installs Übersicht)
+  claude-s -- --resume         everything after -- goes to claude
+  claude-s dashboard --no-claude   do the actions only, don't start Claude
+
+${c_b}Without starting Claude${c_0}:
+  claude-s status              board in the terminal
+  claude-s focus 3             jump to agent in slot 3
+  claude-s open                open the dashboard only
+  claude-s restart | stop      restart / stop the daemon
+  claude-s menubar             (re)install the menu-bar icon
+  claude-s demo                demo board with fake agents (stops the real daemon)
+  claude-s help
+
+Dashboard: $URL/
+EOF
+}
+
+# ---------- parse ----------
+actions=(); standalone=""; focus_arg=""; no_claude=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    dashboard|dash|web)      actions+=(dashboard) ;;
+    compact|window)          actions+=(compact) ;;
+    menubar|menu|swiftbar)   actions+=(swiftbar) ;;
+    widget|desktop|ubersicht|übersicht) actions+=(ubersicht) ;;
+    --no-claude)             no_claude=1 ;;
+    status|ls)               standalone=status ;;
+    open)                    standalone=open ;;
+    focus)                   standalone=focus; shift; focus_arg="${1:-}" ;;
+    stop)                    standalone=stop ;;
+    restart)                 standalone=restart ;;
+    demo)                    standalone=demo ;;
+    help|-h|--help)          usage; exit 0 ;;
+    --)                      shift; break ;;
+    *)                       break ;;
+  esac
+  shift || true
+done
+
+case "$standalone" in
+  status)  act_status; exit 0 ;;
+  open)    act_dashboard; exit 0 ;;
+  focus)   act_focus "$focus_arg"; exit 0 ;;
+  stop)    stop_daemon; exit 0 ;;
+  restart) stop_daemon; sleep 0.3; ensure_daemon && say "daemon running on $URL/"; exit 0 ;;
+  demo)    stop_daemon; say "demo on $URL/  (Ctrl+C to stop)"; exec node "$PLUGIN/server/server.js" --demo ;;
+esac
+
+for a in "${actions[@]+"${actions[@]}"}"; do "act_$a" || true; done
+ensure_daemon || true
+[ "$no_claude" = 1 ] && exit 0
+ensure_menubar || true
+command -v claude >/dev/null || { warn "claude not found — install Claude Code first"; exit 1; }
+exec claude --plugin-dir "$PLUGIN" "$@"

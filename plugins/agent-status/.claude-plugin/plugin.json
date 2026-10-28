@@ -1,0 +1,9 @@
+{
+  "name": "agent-status",
+  "version": "0.1.0",
+  "description": "Live status board for all running Claude Code agents with click-to-focus. Menu bar, web dashboard, desktop widget and a Stream Deck-ready API.",
+  "author": { "name": "Agent Status contributors" },
+  "license": "MIT",
+  "keywords": ["status", "dashboard", "menubar", "multi-agent", "hooks", "stream-deck"],
+  "icon": "./.claude-plugin/icon.png"
+}

@@ -1,0 +1,12 @@
+{
+  "name": "agent-status",
+  "owner": { "name": "Agent Status contributors" },
+  "description": "Live status board for all your running Claude Code sessions.",
+  "plugins": [
+    {
+      "name": "agent-status",
+      "source": "./plugins/agent-status",
+      "description": "Live status board for all running Claude Code agents (in progress / needs input / retry / sleeping / done) with click-to-focus."
+    }
+  ]
+}

@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agents</title>
+<style>
+:root {
+  --bg: #0E0F12; --panel: #16181D; --panel-2: #1C1F26; --line: #262A33;
+  --text: #ECEEF2; --muted: #8B90A0; --faint: #5B6070;
+  --waiting: #F5A524; --retry: #F04D4D; --in_progress: #4C8DFF;
+  --sleeping: #8B8FA3; --done: #2FBF71; --ended: #4A4D58;
+  --radius: 12px;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #F4F5F7; --panel: #FFFFFF; --panel-2: #F0F1F4; --line: #E2E4E9;
+    --text: #15171C; --muted: #646A78; --faint: #9AA0AD; --sleeping: #7C8194; --ended: #B5B8C2;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #F4F5F7; --panel: #FFFFFF; --panel-2: #F0F1F4; --line: #E2E4E9;
+  --text: #15171C; --muted: #646A78; --faint: #9AA0AD; --sleeping: #7C8194; --ended: #B5B8C2;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 var(--sans); }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+
+header {
+  position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 14px 20px; background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 16px; letter-spacing: -0.01em; }
+.live { width: 8px; height: 8px; border-radius: 50%; background: var(--done); box-shadow: 0 0 0 3px color-mix(in srgb, var(--done) 25%, transparent); }
+.live.off { background: var(--retry); box-shadow: 0 0 0 3px color-mix(in srgb, var(--retry) 25%, transparent); }
+.brand small { color: var(--muted); font-weight: 450; font-size: 13px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.chip {
+  display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 12.5px; white-space: nowrap;
+}
+.chip b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
+.chip.on { border-color: var(--text); color: var(--text); }
+.chip.zero { opacity: .45; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--c); }
+.tools { display: flex; gap: 6px; }
+.tool { padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 12.5px; }
+.tool:hover { color: var(--text); }
+
+main { padding: 20px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
+
+.card {
+  position: relative; text-align: left; width: 100%; display: flex; flex-direction: column; gap: 10px;
+  padding: 14px 16px 13px 18px; border-radius: var(--radius); background: var(--panel);
+  border: 1px solid var(--line); overflow: hidden; transition: transform .12s ease, border-color .12s ease;
+}
+.card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--c); }
+.card:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--c) 55%, var(--line)); }
+.card:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
+.card.alert { border-color: color-mix(in srgb, var(--c) 60%, var(--line)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--c) 30%, transparent), 0 8px 30px -12px var(--c); }
+.card.ended { opacity: .55; }
+.row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.slot { font: 600 11.5px var(--mono); color: var(--muted); background: var(--panel-2); border-radius: 6px; padding: 2px 6px; }
+.status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--c); text-transform: uppercase; letter-spacing: .04em; }
+.pulse .dot { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 60%, transparent); } 50% { box-shadow: 0 0 0 5px transparent; } }
+.age { margin-left: auto; font: 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.name { font-size: 17px; font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.branch { font: 12px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.detail {
+  font: 12.5px/1.45 var(--mono); color: var(--muted); background: var(--panel-2); border-radius: 8px; padding: 8px 10px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.9em; word-break: break-word;
+}
+.card.alert .detail { color: var(--text); }
+.meta { display: flex; gap: 12px; font-size: 12px; color: var(--faint); flex-wrap: wrap; }
+.meta span { white-space: nowrap; }
+.x {
+  position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; border-radius: 6px; color: var(--faint);
+  display: none; align-items: center; justify-content: center; font-size: 16px; line-height: 1;
+}
+.card:hover .x { display: flex; }
+.card:hover .age { visibility: hidden; }
+.x:hover { background: var(--panel-2); color: var(--text); }
+
+/* compact list (small window / widget) */
+body.compact header { padding: 10px 12px; gap: 8px; }
+body.compact .chips .chip span.lbl { display: none; }
+body.compact main { padding: 8px; }
+body.compact .grid { grid-template-columns: 1fr; gap: 4px; }
+body.compact .card { flex-direction: row; align-items: center; padding: 8px 10px 8px 14px; gap: 10px; border-radius: 8px; }
+body.compact .card .branch, body.compact .card .detail, body.compact .card .meta, body.compact .card .x { display: none !important; }
+body.compact .card .name { font-size: 14px; flex: 1; }
+body.compact .card .row:first-child { order: 2; flex: none; }
+body.compact .card .top2 { order: 1; flex: 1; min-width: 0; }
+body.compact .card:hover .age { visibility: visible; }
+
+.empty { max-width: 520px; margin: 12vh auto; text-align: center; color: var(--muted); }
+.empty h2 { color: var(--text); font-size: 18px; margin: 0 0 8px; }
+.empty code { font-family: var(--mono); background: var(--panel); border: 1px solid var(--line); padding: 2px 6px; border-radius: 6px; }
+
+.banner { display: none; margin: 16px 20px 0; padding: 10px 14px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--retry) 50%, var(--line)); background: color-mix(in srgb, var(--retry) 10%, var(--panel)); }
+.banner.show { display: block; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
+  background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 10px; font-size: 13px; transition: .2s ease;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+kbd { font: 11px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; color: var(--muted); }
+footer { padding: 4px 20px 24px; color: var(--faint); font-size: 12px; }
+body.compact footer { display: none; }
+
+@media (max-width: 560px) {
+  header { padding: 12px 16px; }
+  main { padding: 12px 16px; }
+  .chips { margin-left: 0; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="live" id="live"></span>Agents <small id="total"></small></div>
+  <div class="chips" id="chips"></div>
+  <div class="tools">
+    <button class="tool" id="viewBtn" title="Toggle compact view">Compact</button>
+    <button class="tool" id="clearBtn" title="Hide done sessions until their next activity">Clear done</button>
+  </div>
+</header>
+<div class="banner" id="banner">Daemon is not reachable. It starts automatically with the next Claude Code hook, or run <code>node server/server.js</code>.</div>
+<main><div class="grid" id="grid"></div><div id="empty"></div></main>
+<footer>Click a card to jump to its window · <kbd>1</kbd>–<kbd>9</kbd> focus by slot · API: <code>/api/agents</code>, <code>/api/stream</code>, <code>/api/slot/N.svg</code></footer>
+<div class="toast" id="toast"></div>
+
+<script>
+const ORDER = ['waiting', 'retry', 'in_progress', 'sleeping', 'done'];
+const LABEL = { waiting: 'needs input', retry: 'retry', in_progress: 'in progress', sleeping: 'sleeping', done: 'done' };
+const ALERT = new Set(['waiting', 'retry']);
+const PULSE = new Set(['waiting', 'retry', 'in_progress']);
+const params = new URLSearchParams(location.search);
+let state = { agents: [], counts: {} };
+let filter = null;
+let compact = params.get('view') === 'compact';
+try { if (!params.has('view')) compact = localStorage.getItem('as.compact') === '1'; } catch {}
+if (params.get('theme')) document.documentElement.dataset.theme = params.get('theme');
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function dur(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + 'm ' + String(s % 60).padStart(2, '0') + 's';
+  const h = Math.floor(m / 60);
+  return h + 'h ' + String(m % 60).padStart(2, '0') + 'm';
+}
+
+function renderChips() {
+  const c = state.counts || {};
+  $('chips').innerHTML = ORDER.map((s) => `
+    <button class="chip ${filter === s ? 'on' : ''} ${c[s] ? '' : 'zero'}" data-s="${s}" style="--c:var(--${s})">
+      <span class="dot"></span><span class="lbl">${LABEL[s]}</span><b>${c[s] || 0}</b>
+    </button>`).join('');
+}
+
+function renderGrid() {
+  const now = Date.now();
+  const list = state.agents.filter((a) => !filter || a.status === filter);
+  $('total').textContent = state.agents.length ? `${state.agents.length} session${state.agents.length > 1 ? 's' : ''}` : '';
+  $('grid').innerHTML = list.map((a) => `
+    <div class="card ${ALERT.has(a.status) ? 'alert' : ''}" role="button" tabindex="0"
+         data-id="${esc(a.id)}" style="--c:var(--${a.status})" title="${esc(a.cwd || '')}">
+      <div class="row">
+        <span class="slot">${a.slot}</span>
+        <span class="status ${PULSE.has(a.status) ? 'pulse' : ''}"><span class="dot"></span>${LABEL[a.status]}</span>
+        <span class="age" data-since="${a.since}">${dur(now - a.since)}</span>
+      </div>
+      <div class="top2">
+        <div class="name">${esc(a.project)}</div>
+        ${a.branch ? `<div class="branch">⎇ ${esc(a.branch)}</div>` : ''}
+      </div>
+      <div class="detail">${esc(a.detail || '')}</div>
+      <div class="meta">
+        ${a.terminal ? `<span>▣ ${esc(a.terminal)}</span>` : ''}
+        ${a.subagents ? `<span>⑂ ${a.subagents} subagent${a.subagents > 1 ? 's' : ''}</span>` : ''}
+        <span>started ${dur(now - a.startedAt)} ago</span>
+      </div>
+      <button class="x" data-dismiss="${esc(a.id)}" title="Remove from board">×</button>
+    </div>`).join('');
+  $('empty').innerHTML = state.agents.length ? '' : `
+    <div class="empty"><h2>No agents yet</h2>
+    Start a Claude Code session with the <code>agent-status</code> plugin enabled and it appears here within a second.</div>`;
+  const alerts = (state.counts.waiting || 0) + (state.counts.retry || 0);
+  document.title = alerts ? `(${alerts}) Agents` : 'Agents';
+}
+
+function render() { renderChips(); renderGrid(); }
+
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 1600);
+}
+
+async function post(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  return r.json().catch(() => ({}));
+}
+
+async function focusAgent(id) {
+  const a = state.agents.find((x) => x.id === id);
+  const r = await post(`/api/agents/${encodeURIComponent(id)}/focus`);
+  toast(r.ok ? `→ ${a ? a.project : ''} (${r.method})` : `Couldn't locate the window for ${a ? a.project : 'this agent'}`);
+}
+
+$('grid').addEventListener('click', async (e) => {
+  const d = e.target.closest('[data-dismiss]');
+  if (d) { e.stopPropagation(); await post(`/api/agents/${encodeURIComponent(d.dataset.dismiss)}/dismiss`); return; }
+  const c = e.target.closest('.card'); if (c) focusAgent(c.dataset.id);
+});
+$('grid').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.classList.contains('card')) focusAgent(e.target.dataset.id);
+});
+$('chips').addEventListener('click', (e) => {
+  const c = e.target.closest('.chip'); if (!c) return;
+  filter = filter === c.dataset.s ? null : c.dataset.s; render();
+});
+$('clearBtn').onclick = () => post('/api/clear', { statuses: ['done'] });
+function applyView() {
+  document.body.classList.toggle('compact', compact);
+  $('viewBtn').textContent = compact ? 'Cards' : 'Compact';
+}
+$('viewBtn').onclick = () => { compact = !compact; try { localStorage.setItem('as.compact', compact ? '1' : '0'); } catch {} applyView(); };
+document.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || /input|textarea/i.test(e.target.tagName)) return;
+  if (/^[1-9]$/.test(e.key)) {
+    const a = state.agents.find((x) => x.slot === Number(e.key));
+    if (a) focusAgent(a.id);
+  }
+});
+
+function connect() {
+  const es = new EventSource('/api/stream');
+  es.onmessage = (m) => { state = JSON.parse(m.data); $('live').classList.remove('off'); $('banner').classList.remove('show'); render(); };
+  es.onerror = () => { $('live').classList.add('off'); $('banner').classList.add('show'); };
+}
+
+setInterval(() => {
+  const now = Date.now();
+  document.querySelectorAll('.age').forEach((el) => { el.textContent = dur(now - Number(el.dataset.since)); });
+}, 1000);
+
+applyView();
+render();
+connect();
+</script>
+</body>
+</html>
