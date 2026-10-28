@@ -94,17 +94,23 @@ Each agent gets a stable slot number, and the daemon serves a ready-made key ima
 
 ## Click to jump to the session
 
+A click only brings the session's existing window to the front. It never opens a project, a folder or a new window.
+
 | Where the session runs | What a click does |
 |---|---|
 | **iTerm2** | Focuses the exact tab or split |
 | **Terminal.app** | Focuses the exact tab |
 | **tmux** (any terminal) | Switches to the exact window and pane |
-| **JetBrains IDEs** (Rider, PyCharm, IntelliJ IDEA, WebStorm, GoLand…) | Focuses that project's window |
-| **VS Code, Cursor, Windsurf** | Focuses that project's window |
+| **JetBrains IDEs** (Rider, PyCharm, IntelliJ IDEA, WebStorm, GoLand…) | Raises that project's window |
+| **VS Code, Cursor, Windsurf** | Raises that project's window |
 | **WezTerm, kitty** | Focuses the pane or window, if the app's CLI is available |
-| Ghostty, Warp, others | Brings the app to the front |
+| Ghostty, Warp, others | Raises the project's window, or brings the app to the front |
 
-The first time you click, macOS asks whether `node` may control iTerm2 or Terminal. Allow it, or go to System Settings → Privacy & Security → Automation.
+The app is detected from the process tree, so it works even when an IDE was launched from a terminal.
+
+**macOS permissions** (asked once, on the first click):
+- **Automation**: allow control of iTerm2, Terminal or System Events.
+- **Accessibility**, for IDEs only: needed to pick the right project window when several are open. Without it, the IDE still comes to the front. To grant it, go to System Settings → Privacy & Security → Accessibility.
 
 ## The `claude-s` command
 
@@ -201,7 +207,7 @@ Set these in your shell environment:
 
 - **A session doesn't show up.** Make sure it was started with `claude-s`, then send it a prompt. If it was started from an IDE terminal, check that the folder isn't in `~/Documents`, `~/Desktop` or `~/Downloads` (see Quick start).
 - **The menu bar shows `◌`.** The service isn't running. It starts with the next `claude-s`, or run `claude-s restart`.
-- **A click doesn't switch windows.** Allow Automation access for `node` (see [Click to jump to the session](#click-to-jump-to-the-session)).
+- **A click doesn't switch windows.** Allow the Automation and Accessibility prompts (see [Click to jump to the session](#click-to-jump-to-the-session)). Sessions started before an update record their window on the next prompt.
 - **Status looks wrong.** `claude-s restart` resets the service. Live sessions reappear after their next event.
 
 ## Limitations

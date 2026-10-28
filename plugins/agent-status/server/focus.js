@@ -1,7 +1,10 @@
-// Bring the terminal / editor window of an agent to the front.
-// Values come from our own hooks, but are still validated before they reach any
-// command, and everything runs through execFile (no shell).
+// Bring the window of an agent's session to the front.
+// Only ever *focuses* existing windows: it never opens a project, folder or new window.
+// Values come from our own hooks but are still validated, and every command runs
+// through execFile (no shell).
 'use strict';
+const fs = require('fs');
+const path = require('path');
 const { execFile } = require('child_process');
 
 const RE = {
@@ -10,6 +13,7 @@ const RE = {
   uuid: /^[0-9A-Fa-f-]{36}$/,
   bundle: /^[\w.-]+$/,
   num: /^\d+$/,
+  app: /^\/[^\0]*\.app$/,
 };
 
 function run(cmd, args, timeout = 3000) {
@@ -18,10 +22,10 @@ function run(cmd, args, timeout = 3000) {
   });
 }
 
+// iTerm2: select the exact session (tab / split) by its unique id.
 const ITERM = `on run argv
   set target to item 1 of argv
   tell application "iTerm2"
-    activate
     repeat with w in windows
       repeat with t in tabs of w
         repeat with s in sessions of t
@@ -29,6 +33,7 @@ const ITERM = `on run argv
             select w
             select t
             select s
+            activate
             return "ok"
           end if
         end repeat
@@ -38,15 +43,16 @@ const ITERM = `on run argv
   return "miss"
 end run`;
 
+// Terminal.app: select the tab that owns the session's tty.
 const TERMINAL = `on run argv
   set target to item 1 of argv
   tell application "Terminal"
-    activate
     repeat with w in windows
       repeat with t in tabs of w
         if tty of t is target then
           set selected of t to true
           set index of w to 1
+          activate
           return "ok"
         end if
       end repeat
@@ -55,20 +61,35 @@ const TERMINAL = `on run argv
   return "miss"
 end run`;
 
-const EDITORS = new Set([
-  'com.microsoft.VSCode', 'com.microsoft.VSCodeInsiders', 'com.vscodium',
-  'com.todesktop.230313mzl4w4u92', // Cursor
-  'com.exafunction.windsurf', 'dev.zed.Zed',
-]);
+// Any other app (JetBrains IDEs, VS Code, Cursor, Ghostty, ...): bring the app forward and raise
+// its window whose title contains the project name. Needs Accessibility permission to pick the
+// window; without it the app is still brought forward.
+const RAISE = `on run argv
+  set thePid to (item 1 of argv) as integer
+  set needle to item 2 of argv
+  tell application "System Events"
+    set p to first process whose unix id is thePid
+    set frontmost of p to true
+    repeat with w in windows of p
+      if name of w contains needle then
+        perform action "AXRaise" of w
+        return "ok"
+      end if
+    end repeat
+  end tell
+  return "app"
+end run`;
 
-const TERM_PROGRAM_BUNDLE = {
-  'iTerm.app': 'com.googlecode.iterm2',
-  Apple_Terminal: 'com.apple.Terminal',
-  ghostty: 'com.mitchellh.ghostty',
-  WezTerm: 'com.github.wez.wezterm',
-  WarpTerminal: 'dev.warp.Warp-Stable',
-  vscode: 'com.microsoft.VSCode',
+const TERM_PROGRAM_APP = {
+  'iTerm.app': 'iTerm2', iTerm2: 'iTerm2', Apple_Terminal: 'Terminal', ghostty: 'Ghostty', WezTerm: 'WezTerm',
+  WarpTerminal: 'Warp', vscode: 'Visual Studio Code',
 };
+
+function appName(loc) {
+  if (loc.hostApp === 'iTerm2') return 'iTerm2';
+  if (loc.hostApp) return path.basename(loc.hostApp, '.app');
+  return TERM_PROGRAM_APP[loc.termProgram] || TERM_PROGRAM_APP[loc.lcTerminal] || null;
+}
 
 async function focusTmux(loc) {
   if (!loc.tmuxPane || !RE.pane.test(loc.tmuxPane)) return false;
@@ -80,61 +101,49 @@ async function focusTmux(loc) {
   return a.ok || b.ok || c.ok;
 }
 
-// JetBrains IDEs, most common first. Opening the project folder focuses its window.
-const JETBRAINS = [
-  'com.jetbrains.pycharm', 'com.jetbrains.pycharm.ce', 'com.jetbrains.intellij', 'com.jetbrains.intellij.ce',
-  'com.jetbrains.WebStorm', 'com.jetbrains.goland', 'com.jetbrains.datagrip', 'com.jetbrains.rider',
-  'com.jetbrains.CLion', 'com.jetbrains.PhpStorm', 'com.jetbrains.rubymine', 'com.google.android.studio',
-];
-
-async function focusJetBrains(agent) {
-  for (const id of JETBRAINS) {
-    const r = await run('open', ['-b', id, ...(agent.cwd ? [agent.cwd] : [])]);
-    if (r.ok) return id.split('.').pop();
+async function activate(loc, name) {
+  if (loc.hostApp && RE.app.test(loc.hostApp) && fs.existsSync(loc.hostApp)) {
+    return (await run('open', ['-a', loc.hostApp])).ok; // no path argument: activates, never opens anything
   }
-  return null;
+  if (name) return (await run('open', ['-a', name])).ok;
+  return false;
 }
 
 async function focusMac(agent, loc) {
-  // IDE terminals inherit env from whatever launched the IDE (often iTerm),
-  // so detect them first or we'd focus the wrong app.
-  if (loc.terminalEmulator && /JetBrains/i.test(loc.terminalEmulator)) {
-    const r = await focusJetBrains(agent);
-    if (r) return r;
-  }
-  if (loc.termProgram === 'vscode' && agent.cwd) {
-    const b = EDITORS.has(loc.bundleId) ? loc.bundleId : 'com.microsoft.VSCode';
-    const r = await run('open', ['-b', b, agent.cwd]);
-    if (r.ok) return 'editor';
-  }
-  const iterm = loc.itermSession && String(loc.itermSession).split(':').pop();
-  const bundle = (loc.bundleId && RE.bundle.test(loc.bundleId)) ? loc.bundleId
-    : TERM_PROGRAM_BUNDLE[loc.termProgram] || TERM_PROGRAM_BUNDLE[loc.lcTerminal];
+  const name = appName(loc);
+  const project = agent.project || '';
 
-  if (iterm && RE.uuid.test(iterm) && (!bundle || bundle === 'com.googlecode.iterm2')) {
-    const r = await run('osascript', ['-e', ITERM, iterm]);
-    if (r.out === 'ok') return 'iTerm2';
+  if (name === 'iTerm2') {
+    const id = loc.itermSession && String(loc.itermSession).split(':').pop();
+    if (id && RE.uuid.test(id)) {
+      const r = await run('osascript', ['-e', ITERM, id]);
+      if (r.out === 'ok') return 'iTerm2 tab';
+    }
+    return (await activate(loc, 'iTerm')) ? 'iTerm2' : null;
   }
-  if (bundle === 'com.apple.Terminal' && loc.tty && RE.tty.test(loc.tty)) {
-    const r = await run('osascript', ['-e', TERMINAL, loc.tty]);
-    if (r.out === 'ok') return 'Terminal';
+
+  if (name === 'Terminal') {
+    if (loc.tty && RE.tty.test(loc.tty)) {
+      const r = await run('osascript', ['-e', TERMINAL, loc.tty]);
+      if (r.out === 'ok') return 'Terminal tab';
+    }
+    return (await activate(loc, 'Terminal')) ? 'Terminal' : null;
   }
-  if (bundle === 'com.github.wez.wezterm' && loc.weztermPane && RE.num.test(loc.weztermPane)) {
+
+  if (name === 'WezTerm' && loc.weztermPane && RE.num.test(loc.weztermPane)) {
     await run('wezterm', ['cli', 'activate-pane', '--pane-id', loc.weztermPane]);
   }
-  if (bundle === 'net.kovidgoyal.kitty' && loc.kittyWindow && RE.num.test(loc.kittyWindow)) {
+  if (loc.kittyWindow && RE.num.test(loc.kittyWindow)) {
     await run('kitten', ['@', 'focus-window', '--match', `id:${loc.kittyWindow}`]);
   }
-  if (bundle && EDITORS.has(bundle) && agent.cwd) {
-    // Opening the folder focuses the editor window that already has it open.
-    const r = await run('open', ['-b', bundle, agent.cwd]);
-    if (r.ok) return 'editor';
+
+  // IDEs and everything else: raise the project's window in the running app.
+  if (loc.hostPid && RE.num.test(String(loc.hostPid)) && project) {
+    const r = await run('osascript', ['-e', RAISE, String(loc.hostPid), project]);
+    if (r.out === 'ok') return `${name} window`;
+    if (r.out === 'app') return name;
   }
-  if (bundle) {
-    const r = await run('open', ['-b', bundle]);
-    if (r.ok) return 'app';
-  }
-  return null;
+  return (await activate(loc, name)) ? name : null;
 }
 
 async function focusLinux(agent, loc) {
@@ -154,7 +163,7 @@ async function focus(agent) {
   if (process.platform === 'darwin') app = await focusMac(agent, loc);
   else if (process.platform === 'linux') app = await focusLinux(agent, loc);
   if (app) steps.push(app);
-  return { ok: steps.length > 0, method: steps.join('+') || 'none' };
+  return { ok: steps.length > 0, method: steps.join(' + ') || 'none' };
 }
 
-module.exports = { focus };
+module.exports = { focus, appName };

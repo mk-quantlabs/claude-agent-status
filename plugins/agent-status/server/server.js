@@ -7,7 +7,7 @@ const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { focus } = require('./focus');
+const { focus, appName } = require('./focus');
 
 const PORT = Number(process.env.AGENT_STATUS_PORT) || 4317;
 const HOST = '127.0.0.1';
@@ -201,14 +201,7 @@ function snapshot() {
 
 function describeTerminal(loc) {
   if (!loc) return null;
-  if (loc.terminalEmulator && /JetBrains/i.test(loc.terminalEmulator)) return ['JetBrains IDE', loc.tmuxPane ? 'tmux' : null].filter(Boolean).join(' · ');
-  if (loc.termProgram === 'vscode') return 'VS Code';
-  const app = {
-    'com.googlecode.iterm2': 'iTerm2', 'com.apple.Terminal': 'Terminal', 'com.mitchellh.ghostty': 'Ghostty',
-    'com.github.wez.wezterm': 'WezTerm', 'dev.warp.Warp-Stable': 'Warp', 'net.kovidgoyal.kitty': 'kitty',
-    'com.microsoft.VSCode': 'VS Code', 'com.todesktop.230313mzl4w4u92': 'Cursor', 'com.exafunction.windsurf': 'Windsurf',
-  }[loc.bundleId] || loc.lcTerminal || loc.termProgram || null;
-  return [app, loc.tmuxPane ? 'tmux' : null].filter(Boolean).join(' · ') || null;
+  return [appName(loc), loc.tmuxPane ? 'tmux' : null].filter(Boolean).join(' · ') || null;
 }
 
 function esc(s) {
@@ -247,8 +240,10 @@ function swiftbar() {
     const url = `http://${HOST}:${PORT}/api/agents/${a.id}/focus`;
     const click = `bash=/usr/bin/curl param1=-s param2=-X param3=POST param4=-H param5=Content-Type:application/json param6=${url} terminal=false refresh=true`;
     const txt = `${DOT[a.status] || '•'} ${a.slot}. ${a.project} — ${a.label}`.replace(/\|/g, '/');
-    lines.push(`${txt} | ${click}`);
-    if (a.detail) lines.push(`      ${a.detail.replace(/\|/g, '/').slice(0, 70)} | size=11 color=#8B8FA3 ${click}`);
+    const tip = [a.detail, a.terminal].filter(Boolean).join(' · ').replace(/\|/g, '/').replace(/"/g, "'").slice(0, 160);
+    lines.push(`${txt} | ${click}${tip ? ` tooltip="${tip}"` : ''}`);
+    // Detail as a plain, non-clickable grey line: one agent = one clickable row.
+    if (a.detail) lines.push(`      ${a.detail.replace(/\|/g, '/').slice(0, 70)} | size=11 color=#8B8FA3 disabled=true`);
   }
   if (!s.agents.length) lines.push('No agents');
   lines.push('---', `Open dashboard | href=http://${HOST}:${PORT}/`);

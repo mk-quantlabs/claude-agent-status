@@ -36,28 +36,51 @@ function ttyOfSelf() {
   } catch { return undefined; }
 }
 
-// PID of the Claude Code process that ran this hook: walk up past any wrapper shells.
-// The daemon uses it to drop sessions whose process is gone (closed tab, Ctrl+C, crash).
-const SHELLS = /^-?(sh|bash|zsh|dash|fish|ksh)$/;
-function claudePid() {
+// Walk up the process tree once (single `ps` call) to find:
+//  - pid:     the Claude Code process (first ancestor that isn't a shell). The daemon uses it
+//             to drop sessions whose process is gone (closed tab, Ctrl+C, crash).
+//  - hostApp: the GUI app the session really runs in (iTerm, PyCharm, Rider, VS Code, ...),
+//             found from the process tree rather than env vars, which IDEs often inherit
+//             from whatever terminal launched them.
+const SHELLS = /^-?(sh|bash|zsh|dash|fish|ksh|login)$/;
+function processInfo() {
+  const out = {};
   try {
+    const table = execFileSync('ps', ['-axo', 'pid=,ppid=,comm='], { encoding: 'utf8', timeout: 600, maxBuffer: 8 << 20 });
+    const procs = new Map();
+    for (const line of table.split('\n')) {
+      const m = line.match(/^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/);
+      if (m) procs.set(Number(m[1]), { ppid: Number(m[2]), comm: m[3] });
+    }
     let pid = process.ppid;
-    for (let i = 0; i < 5 && pid > 1; i++) {
-      const out = execFileSync('ps', ['-o', 'ppid=,comm=', '-p', String(pid)], { encoding: 'utf8', timeout: 400 }).trim();
-      const m = out.match(/^(\d+)\s+(.+)$/);
-      if (!m) return undefined;
-      if (!SHELLS.test(path.basename(m[2].trim()))) return pid;
-      pid = Number(m[1]);
+    for (let i = 0; i < 30 && pid > 1; i++) {
+      const p = procs.get(pid);
+      if (!p) break;
+      if (!out.pid && !SHELLS.test(path.basename(p.comm))) out.pid = pid;
+      const app = p.comm.match(/^(\/.*?\.app)\/Contents\//);
+      if (app) {
+        // Helpers (e.g. "Code Helper") live inside the main bundle: climb to the topmost
+        // process of the same app, which is the one that owns the windows.
+        out.hostApp = app[1]; out.hostPid = pid;
+        for (let q = procs.get(p.ppid), qpid = p.ppid; q && q.comm.startsWith(app[1] + '/'); qpid = q.ppid, q = procs.get(q.ppid)) out.hostPid = qpid;
+        break;
+      }
+      if (/iTermServer/.test(p.comm)) { out.hostApp = 'iTerm2'; break; } // iTerm's detached session server
+      if (/(^|\/)tmux/.test(path.basename(p.comm))) { out.inTmux = true; break; }
+      pid = p.ppid;
     }
   } catch { /* ignore */ }
-  return undefined;
+  return out;
 }
 
 // Where does this session live? Captured on SessionStart / UserPromptSubmit only.
 function location() {
   const e = process.env;
+  const pi = processInfo();
   return {
-    pid: claudePid(),
+    pid: pi.pid,
+    hostApp: pi.hostApp,
+    hostPid: pi.hostPid,
     tty: ttyOfSelf(),
     tmux: e.TMUX || undefined,
     tmuxPane: e.TMUX_PANE || undefined,
