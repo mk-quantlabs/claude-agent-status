@@ -101,7 +101,7 @@ A click only brings the session's existing window to the front. It never opens o
 | **iTerm2** | Focuses the exact tab or split |
 | **Terminal.app** | Focuses the exact tab |
 | **tmux** (any terminal) | Switches to the exact window and pane |
-| **JetBrains IDEs** (Rider, PyCharm, IntelliJ IDEA, WebStorm, GoLand…) | Brings up the project the session belongs to, whether projects are separate windows or tabs of one window |
+| **JetBrains IDEs** (Rider, PyCharm, IntelliJ IDEA, WebStorm, GoLand…) · *beta* | Brings up the project the session belongs to, whether projects are separate windows or tabs of one window. If it picks the wrong project, please [open an issue](https://github.com/mk-quantlabs/claude-agent-status/issues) with the output of `claude-s debug` |
 | **VS Code, Cursor, Windsurf** | Raises that project's window |
 | **WezTerm, kitty** | Focuses the pane or window, if the app's CLI is available |
 | Ghostty, Warp, others | Raises the project's window, or brings the app to the front |
@@ -220,6 +220,7 @@ Run `claude-s doctor` first. It checks the setup, restarts the service, tests th
 
 - Shows Claude Code sessions on this computer only. Cloud sessions and claude.ai chats don't run local hooks.
 - Claude Code has no "retry" event, so **retry** is inferred from repeated tool failures.
+- JetBrains support is in beta: with several projects open, the click may not always land on the right project.
 - In JetBrains IDEs and VS Code, a click switches to the right project window, but it can't select a specific terminal tab inside the IDE. For exact-tab jumps, run sessions in iTerm2, Terminal or tmux.
 - The menu bar and desktop widget are macOS-only. The dashboard, terminal view and tmux focus also work on Linux.
 
