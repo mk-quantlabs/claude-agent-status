@@ -18,6 +18,8 @@ To try your changes with real sessions without installing anything:
 bin/claude-s               # starts Claude with the plugin from this folder
 ```
 
+If the plugin is installed from this folder (`install.sh`), plain `claude` already uses your working copy.
+
 ## Project layout
 
 | Path | What it is |
@@ -44,6 +46,7 @@ find . -name '*.js' -not -path './node_modules/*' -exec node --check {} \;
 node tests/navigation.test.js       # window / tab matching for every supported layout
 node tests/keepawake.test.js        # keep-awake decisions, approvals, settings
 bash tests/keepawake.integration.sh # keep-awake and approvals against a running service
+bash tests/launcher.test.sh         # claude-s launch, install.sh / uninstall.sh plugin steps
 bash -n bin/claude-s install.sh uninstall.sh
 claude plugin validate .            # if you have Claude Code installed
 ```

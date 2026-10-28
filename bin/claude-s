@@ -53,6 +53,17 @@ kill_daemon() {
 }
 stop_daemon() { if daemon_up; then kill_daemon; say "daemon stopped"; else kill_daemon; say "daemon was not running"; fi; }
 
+# True when the plugin is installed and enabled in Claude Code (user settings), so every
+# `claude` session already loads it.
+plugin_installed() {
+  node -e '
+    const dir = process.env.CLAUDE_CONFIG_DIR || require("path").join(require("os").homedir(), ".claude");
+    try {
+      const s = JSON.parse(require("fs").readFileSync(require("path").join(dir, "settings.json"), "utf8"));
+      process.exit(Object.entries(s.enabledPlugins || {}).some(([k, v]) => /^agent-status@/.test(k) && v === true) ? 0 : 1);
+    } catch { process.exit(1); }'
+}
+
 # ---------- actions ----------
 open_url() { if is_mac; then open "$1"; else xdg-open "$1" >/dev/null 2>&1 || echo "$1"; fi; }
 
@@ -202,6 +213,8 @@ act_doctor() {
   if command -v node >/dev/null; then echo "$ok Node $(node -v)"; else echo "$bad Node.js not found (brew install node)"; fails=1; fi
   if command -v claude >/dev/null; then echo "$ok Claude Code found"; else echo "$bad Claude Code not found on PATH"; fails=1; fi
   echo "$ok claude-s: $ROOT/bin/claude-s"
+  if plugin_installed; then echo "$ok Plugin installed in Claude Code: every claude session reports its status"
+  else echo "$warn Plugin not installed in Claude Code: only sessions started with claude-s report (install: $ROOT/install.sh)"; fi
 
   # Restarts the service.
   kill_daemon; sleep 0.2
@@ -312,4 +325,5 @@ ensure_daemon || true
 [ "$no_claude" = 1 ] && exit 0
 ensure_menubar || true
 command -v claude >/dev/null || { warn "claude not found — install Claude Code first"; exit 1; }
+if plugin_installed; then exec claude "$@"; fi
 exec claude --plugin-dir "$PLUGIN" "$@"

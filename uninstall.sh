@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# Agent Status uninstaller: stops the service and removes the claude-s alias, the widgets
-# and the saved state. SwiftBar and Übersicht stay installed.
+# Agent Status uninstaller: stops the service and removes the Claude Code plugin, the claude-s
+# alias, the widgets and the saved state. SwiftBar and Übersicht stay installed.
 set -uo pipefail
 
 ok() { printf '\e[32m✓\e[0m %s\n' "$*"; }
 
 pkill -f "node[^ ]* [^ ]*agent-status/server/server\.js" 2>/dev/null && ok "Stopped the daemon"
+
+if command -v claude >/dev/null; then
+  claude plugin uninstall agent-status@agent-status >/dev/null 2>&1 && ok "Removed the Claude Code plugin"
+  claude plugin marketplace remove agent-status >/dev/null 2>&1
+fi
 
 for rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
   if [ -f "$rc" ] && grep -q "alias claude-s=" "$rc"; then

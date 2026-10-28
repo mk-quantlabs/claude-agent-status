@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `install.sh` installs the plugin in Claude Code (loaded in place from the cloned folder), so plain `claude` reports its status; `--no-plugin` skips it. `uninstall.sh` removes it.
+- `claude-s` runs plain `claude` when the plugin is installed in Claude Code, so it is never loaded twice.
+- `claude-s doctor` shows whether the plugin is installed in Claude Code.
+- README: highlights, recommended install, FAQ.
+
 ## 0.2.0
 
 - **Keep awake while agents work**: `caffeinate` keeps the Mac from idle sleep while at least one agent works, including behind the lock screen; released one minute after work stops. Modes `always` (default), `power`, `off` via `claude-s awake`. ☕ shows while it is active.
