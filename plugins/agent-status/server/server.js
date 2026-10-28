@@ -8,6 +8,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { focus, logAttempt, appName, doctor } = require('./focus');
+const { createKeepAwake } = require('./keepawake');
+const settings = require('./config');
+const { APPROVAL_TYPES, approvalFor, approvalsList, notificationText, notify } = require('./approvals');
 
 const PORT = Number(process.env.AGENT_STATUS_PORT) || 4317;
 const HOST = '127.0.0.1';
@@ -17,6 +20,11 @@ const STALL_MS = (Number(process.env.AGENT_STATUS_STALL_MIN) || 3) * 60e3;   // 
 const FORGET_MS = 6 * 3600e3;                                                  // sessions without a PID are dropped after this
 const RETRY_AFTER = 2;                                                         // consecutive tool failures
 const DEMO = process.argv.includes('--demo');
+const TICK_MS = (Number(process.env.AGENT_STATUS_TICK_S) || 5) * 1e3;               // periodic update interval
+const AWAKE_GRACE_MS = (Number(process.env.AGENT_STATUS_AWAKE_GRACE_S) || 60) * 1e3; // keep-awake hold after work stops
+
+const config = DEMO ? { ...settings.DEFAULTS } : settings.load(STATE_DIR);
+const keepAwake = createKeepAwake({ graceMs: AWAKE_GRACE_MS, powerTtlMs: Math.min(15e3, TICK_MS * 3), dryRun: DEMO });
 
 const STATUSES = ['waiting', 'retry', 'in_progress', 'sleeping', 'done'];
 const LABEL = {
@@ -55,8 +63,8 @@ function saveNow() {
     fs.renameSync(STATE_FILE + '.tmp', STATE_FILE);
   } catch { /* ignore */ }
 }
-// SIGTERM: save state and exit. SIGHUP: ignored.
-process.on('SIGTERM', () => { saveNow(); process.exit(0); });
+// SIGTERM: save state, release keep-awake and exit. SIGHUP: ignored.
+process.on('SIGTERM', () => { saveNow(); keepAwake.stop(); process.exit(0); });
 if (!DEMO) process.on('SIGHUP', () => {});
 
 let saveTimer = null;
@@ -106,6 +114,17 @@ function nextSlot() {
 function setStatus(a, status, detail, now) {
   if (a.status !== status) { a.status = status; a.since = now; }
   if (detail !== undefined) a.detail = detail;
+  if (status !== 'waiting') delete a.approval;
+}
+
+// Marks an agent as waiting for approval (detail: what is being approved); shows a system
+// notification when the wait starts.
+function startApproval(a, message, now) {
+  const continuing = a.status === 'waiting' && a.approval;
+  const approval = continuing ? a.approval : approvalFor(a, message, now);
+  setStatus(a, 'waiting', approval.detail, now);
+  a.approval = approval;
+  if (!continuing && !DEMO && config.systemNotifications) notify(notificationText(a));
 }
 
 // ---------- event -> state ----------
@@ -139,6 +158,7 @@ function apply(ev) {
       break;
     case 'PreToolUse':
       a.pendingTool = ev.tool || 'tool';
+      a.lastToolDetail = ev.detail || ev.tool;
       if (a.status !== 'retry') setStatus(a, 'in_progress', ev.detail || ev.tool, now);
       else a.detail = ev.detail || a.detail;
       break;
@@ -157,12 +177,12 @@ function apply(ev) {
       setStatus(a, 'retry', `API error: ${ev.error || 'request failed'}`, now);
       break;
     case 'Notification':
-      if (ev.notification_type === 'permission_prompt' || ev.notification_type === 'elicitation_dialog') {
-        setStatus(a, 'waiting', ev.message || 'Needs your input', now);
+      if (APPROVAL_TYPES.has(ev.notification_type)) {
+        startApproval(a, ev.message, now);
       } else if (ev.notification_type === 'idle_prompt') {
         if (a.status !== 'done') setStatus(a, 'sleeping', ev.message || 'Idle, waiting for input', now);
       } else if (!ev.notification_type && /permission|approve|input/i.test(ev.message || '')) {
-        setStatus(a, 'waiting', ev.message, now);
+        startApproval(a, ev.message, now);
       }
       break;
     case 'Stop':
@@ -192,7 +212,13 @@ function tick() {
       agents.delete(a.id); changed = true;
     }
   }
-  if (changed) broadcast();
+  const before = JSON.stringify(keepAwake.state());
+  updateKeepAwake();
+  if (changed || JSON.stringify(keepAwake.state()) !== before) broadcast();
+}
+
+function updateKeepAwake() {
+  return keepAwake.update([...agents.values()], config.keepAwake);
 }
 
 // ---------- views ----------
@@ -203,11 +229,17 @@ function snapshot() {
     detail: a.detail, prompt: a.prompt, since: a.since, startedAt: a.startedAt,
     lastActivity: a.lastActivity, subagents: a.subagents, tool: a.pendingTool,
     terminal: describeTerminal(a.loc),
+    approval: a.status === 'waiting' ? a.approval : undefined,
   }));
   list.sort((x, y) => STATUSES.indexOf(x.status) - STATUSES.indexOf(y.status) || x.slot - y.slot);
   const counts = Object.fromEntries(STATUSES.map((s) => [s, 0]));
   for (const a of list) counts[a.status]++;
-  return { agents: list, counts, labels: LABEL, colors: COLOR, ts: Date.now() };
+  return {
+    agents: list, counts, labels: LABEL, colors: COLOR, ts: Date.now(),
+    approvals: approvalsList([...agents.values()]),
+    keepAwake: keepAwake.state(),
+    config,
+  };
 }
 
 function describeTerminal(loc) {
@@ -233,28 +265,57 @@ function keySvg(a, slot) {
 <circle cx="72" cy="58" r="26" fill="${COLOR[a.status]}" opacity="1"/>
 <text x="72" y="66" font-family="Helvetica,Arial" font-weight="700" font-size="22" fill="#111216" text-anchor="middle">${a.slot}</text>
 <text x="72" y="108" font-family="Helvetica,Arial" font-weight="700" font-size="17" fill="#F2F3F5" text-anchor="middle">${esc(name)}</text>
-<text x="72" y="130" font-family="Helvetica,Arial" font-size="14" fill="${COLOR[a.status]}" text-anchor="middle">${esc(LABEL[a.status])} ${t}</text>
+<text x="72" y="130" font-family="Helvetica,Arial" font-size="14" font-weight="${a.status === 'waiting' ? 700 : 400}" fill="${COLOR[a.status]}" text-anchor="middle">${a.status === 'waiting' ? 'APPROVE?' : esc(LABEL[a.status])} ${t}</text>
 </svg>`;
 }
 
-// Menu in SwiftBar / xbar format: one row per agent; a click runs focus-cli.js.
+function ago(ms) {
+  const m = Math.floor(Math.max(0, ms) / 60e3);
+  return m < 1 ? '<1m' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60}m`;
+}
+
+// SwiftBar parameter value: no "|" (field separator) and no double quotes.
+function sbText(t) {
+  return String(t ?? '').replace(/\|/g, '/').replace(/"/g, "'");
+}
+
+// Menu in SwiftBar / xbar format. Status display only; the sole actions are focusing a
+// session (focus-cli.js) and opening the dashboard.
+//   title: ⚠ approvals (orange), ↻ retry, ● in progress, ✓ done, ☕ while keeping the Mac awake
+//   rows:  sessions that need approval, then all other agents, then the keep-awake state
 function swiftbar() {
   const s = snapshot();
   const c = s.counts;
+  const now = Date.now();
+  const ka = s.keepAwake;
   const head = [
     c.waiting ? `⚠${c.waiting}` : '', c.retry ? `↻${c.retry}` : '',
     c.in_progress ? `●${c.in_progress}` : '', c.done ? `✓${c.done}` : '',
+    ka.active ? '☕' : '',
   ].filter(Boolean).join(' ') || '◌';
-  const lines = [`${head} | font=Menlo size=12`, '---'];
+  const lines = [`${head} | font=Menlo size=12${c.waiting ? ' color=#F5A524' : ''}`, '---'];
   const DOT = { waiting: '🟠', retry: '🔴', in_progress: '🔵', sleeping: '⚪️', done: '🟢' };
-  for (const a of s.agents) {
-    const click = `bash="${process.execPath}" param1="${FOCUS_CLI}" param2=${a.id} param3=menubar terminal=false refresh=true`;
-    const txt = `${DOT[a.status] || '•'} ${a.slot}. ${a.project} — ${a.label}`.replace(/\|/g, '/');
-    const tip = [a.detail, a.terminal].filter(Boolean).join(' · ').replace(/\|/g, '/').replace(/"/g, "'").slice(0, 160);
-    lines.push(`${txt} | ${click}${tip ? ` tooltip="${tip}"` : ''}`);
+  const click = (a) => `bash="${process.execPath}" param1="${FOCUS_CLI}" param2=${a.id} param3=menubar terminal=false refresh=true`;
+
+  if (s.approvals.length) {
+    lines.push(`Needs your approval (${s.approvals.length}) | size=11 color=#F5A524`);
+    for (const ap of s.approvals) {
+      const a = s.agents.find((x) => x.id === ap.id);
+      lines.push(`🟠 ${ap.slot}. ${sbText(ap.project)} · ${sbText(ap.detail).slice(0, 60)} · ${ago(now - ap.since)} | ${click(a)} tooltip="${sbText(ap.detail).slice(0, 160)}"`);
+    }
+    lines.push('---');
+  }
+  const others = s.agents.filter((a) => a.status !== 'waiting');
+  for (const a of others) {
+    const txt = sbText(`${DOT[a.status] || '•'} ${a.slot}. ${a.project} — ${a.label}`);
+    const tip = sbText([a.detail, a.terminal].filter(Boolean).join(' · ')).slice(0, 160);
+    lines.push(`${txt} | ${click(a)}${tip ? ` tooltip="${tip}"` : ''}`);
   }
   if (!s.agents.length) lines.push('No agents');
-  lines.push('---', `Open dashboard | href=http://${HOST}:${PORT}/`);
+
+  lines.push('---');
+  lines.push(`${ka.active ? `☕ Keeping Mac awake: ${sbText(ka.reason)}` : `Sleep allowed: ${sbText(ka.reason)}`} | size=12 color=#8B8FA3`);
+  lines.push(`Open dashboard | href=http://${HOST}:${PORT}/`);
   return lines.join('\n');
 }
 
@@ -263,6 +324,7 @@ const clients = new Set();
 let bTimer = null;
 function broadcast() {
   save();
+  updateKeepAwake();
   clearTimeout(bTimer);
   bTimer = setTimeout(() => {
     const msg = `data: ${JSON.stringify(snapshot())}\n\n`;
@@ -320,6 +382,14 @@ const server = http.createServer(async (req, res) => {
       const r = await focus(a); logAttempt(a, r, 'api');
       return send(res, 200, r);
     }
+    if (p === '/api/config') {
+      const r = settings.validate(body);
+      if (r.error) return send(res, 400, { error: r.error });
+      Object.assign(config, r.value);
+      if (!DEMO) { try { settings.save(STATE_DIR, config); } catch { /* not writable */ } }
+      broadcast();
+      return send(res, 200, config);
+    }
     if (p === '/api/clear') {
       const which = new Set(body.statuses || ['done']);
       for (const a of [...agents.values()]) if (which.has(a.status)) agents.delete(a.id);
@@ -333,6 +403,7 @@ const server = http.createServer(async (req, res) => {
   if (p === '/' || p === '/index.html') return send(res, 200, fs.readFileSync(path.join(PUBLIC, 'index.html')), 'text/html; charset=utf-8');
   if (p === '/health') return send(res, 200, { ok: true, agents: agents.size, demo: DEMO, pid: process.pid });
   if (p === '/api/agents') return send(res, 200, snapshot());
+  if (p === '/api/config') return send(res, 200, config);
   if (p === '/api/doctor') return send(res, 200, { ...(await doctor()), pid: process.pid, ppid: process.ppid });
   if (p === '/api/swiftbar') return send(res, 200, swiftbar(), 'text/plain; charset=utf-8');
   if (p === '/api/stream') {
@@ -357,7 +428,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 20e3).unref();
-setInterval(tick, 5e3).unref();
+setInterval(tick, TICK_MS).unref();
 
 server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') process.exit(0); // port already served by a running instance
@@ -367,5 +438,6 @@ server.on('error', (e) => {
 load();
 server.listen(PORT, HOST, () => {
   console.log(`agent-status on http://${HOST}:${PORT}/${DEMO ? '  (demo mode)' : ''}`);
+  updateKeepAwake();
   if (DEMO) require('./demo').start(apply, broadcast);
 });

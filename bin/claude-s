@@ -127,12 +127,32 @@ act_status() {
     const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
     const C = { waiting: 33, retry: 31, in_progress: 34, sleeping: 90, done: 32 };
     const ago = (t) => { const s = Math.floor((Date.now() - t) / 1000); return s < 60 ? s + "s" : s < 3600 ? Math.floor(s/60) + "m" : Math.floor(s/3600) + "h" + Math.floor(s%3600/60) + "m"; };
-    if (!d.agents.length) { console.log("\x1b[2mno agents\x1b[0m"); process.exit(0); }
+    const ap = d.approvals || [];
+    if (ap.length) {
+      console.log(`\x1b[33m⚠ ${ap.length === 1 ? "1 session needs" : ap.length + " sessions need"} your approval\x1b[0m`);
+      for (const a of ap) console.log(`   \x1b[33m${a.slot}. ${a.project}\x1b[0m  ${a.detail.slice(0, 70)}  \x1b[2m${ago(a.since)}\x1b[0m`);
+      console.log("");
+    }
+    if (!d.agents.length) console.log("\x1b[2mno agents\x1b[0m");
     const w = Math.max(...d.agents.map((a) => a.project.length), 7);
     for (const a of d.agents) {
       const col = C[a.status] || 0;
       console.log(`${String(a.slot).padStart(2)}  \x1b[${col}m●\x1b[0m ${a.project.padEnd(w)}  \x1b[${col}m${a.label.padEnd(11)}\x1b[0m ${ago(a.since).padStart(6)}  \x1b[2m${(a.detail || "").slice(0, 60)}\x1b[0m`);
-    }'
+    }
+    const k = d.keepAwake;
+    if (k) console.log(k.active ? `\n☕ keeping the Mac awake (${k.reason})` : `\n\x1b[2msleep allowed (${k.reason}) · mode: ${k.mode}\x1b[0m`);'
+}
+
+# Keep-awake mode: prints it, or sets it (always | power | off).
+act_awake() {
+  ensure_daemon || return 1
+  node "$PLUGIN/server/ctl.js" awake ${1:+"$1"}
+}
+
+# System notifications for approvals: on | off.
+act_notifications() {
+  ensure_daemon || return 1
+  node "$PLUGIN/server/ctl.js" notifications "${1:-}"
 }
 
 act_focus() {
@@ -210,6 +230,10 @@ act_doctor() {
     else echo "$warn Dashboard clicks may not switch windows ($acc). Menu-bar clicks are not affected."; fi
   fi
 
+  echo; echo "${c_b}Keep awake${c_0}"
+  node "$PLUGIN/server/ctl.js" awake | sed 's/^/  /'
+  if is_mac && ! command -v caffeinate >/dev/null; then echo "$bad caffeinate not found"; fails=1; fi
+
   echo
   if [ "$fails" = 0 ]; then echo "${c_g}All good.${c_0} Click an agent in the menu bar to jump to it."
   else echo "Fix the ${c_r}✗${c_0} items above, then run ${c_b}claude-s doctor${c_0} again."; fi
@@ -231,6 +255,8 @@ ${c_b}Without starting Claude${c_0}:
   claude-s status              board in the terminal
   claude-s focus 3             jump to agent in slot 3
   claude-s open                open the dashboard only
+  claude-s awake [always|power|off]   keep the Mac awake while agents work (shows / sets the mode)
+  claude-s notifications on|off      system notifications when a session needs approval
   claude-s doctor              check setup and macOS permissions
   claude-s debug               where each session runs + what the last clicks did (exact errors)
   claude-s restart | stop      restart / stop the daemon
@@ -257,6 +283,8 @@ while [ $# -gt 0 ]; do
     stop)                    standalone=stop ;;
     restart)                 standalone=restart ;;
     doctor|check)            standalone=doctor ;;
+    awake)                   standalone=awake; shift; focus_arg="${1:-}" ;;
+    notifications)           standalone=notifications; shift; focus_arg="${1:-}" ;;
     debug|why)               standalone=debug ;;
     demo)                    standalone=demo ;;
     help|-h|--help)          usage; exit 0 ;;
@@ -272,6 +300,8 @@ case "$standalone" in
   focus)   act_focus "$focus_arg"; exit 0 ;;
   stop)    stop_daemon; exit 0 ;;
   doctor)  act_doctor; exit 0 ;;
+  awake)   act_awake "$focus_arg"; exit $? ;;
+  notifications) act_notifications "$focus_arg"; exit $? ;;
   debug)   act_debug; exit 0 ;;
   restart) stop_daemon; sleep 0.3; ensure_daemon && say "daemon running on $URL/"; exit 0 ;;
   demo)    stop_daemon; say "demo on $URL/  (Ctrl+C to stop)"; exec node "$PLUGIN/server/server.js" --demo ;;

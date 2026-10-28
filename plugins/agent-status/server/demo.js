@@ -26,6 +26,7 @@ function start(apply, broadcast) {
   emit(0, 'PreToolUse', { tool: 'Bash', detail: 'Bash: npm test -- list' });
   emit(1, 'PostToolUseFailure', { tool: 'Bash', error: 'AssertionError: expected 2024-01-31' });
   emit(1, 'PostToolUseFailure', { tool: 'Bash', error: 'AssertionError: expected 2024-01-31' });
+  emit(2, 'PreToolUse', { tool: 'Bash', detail: 'Bash: npm run lint -- --fix' });
   emit(2, 'Notification', { notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' });
   emit(3, 'SubagentStart'); emit(3, 'SubagentStart'); emit(3, 'PreToolUse', { tool: 'Task', detail: 'Task: backfill week 3' });
   emit(4, 'Stop');
@@ -38,7 +39,7 @@ function start(apply, broadcast) {
     if (r < 0.45) emit(i, 'PreToolUse', { tool: 'Bash', detail: BRANCH_TOOLS[Math.floor(Math.random() * BRANCH_TOOLS.length)] });
     else if (r < 0.6) emit(i, 'PostToolUse', { tool: 'Bash' });
     else if (r < 0.7) emit(i, 'Stop');
-    else if (r < 0.78) emit(i, 'Notification', { notification_type: 'permission_prompt', message: 'Claude needs your permission to use Edit' });
+    else if (r < 0.78) { emit(i, 'PreToolUse', { tool: 'Edit', detail: 'Edit: src/settings/tabs.tsx' }); emit(i, 'Notification', { notification_type: 'permission_prompt', message: 'Claude needs your permission to use Edit' }); }
     else if (r < 0.86) { emit(i, 'PostToolUseFailure', { tool: 'Bash', error: 'exit code 1' }); emit(i, 'PostToolUseFailure', { tool: 'Bash', error: 'exit code 1' }); }
     else emit(i, 'UserPromptSubmit', { prompt: PROJECTS[i][1] });
     broadcast();

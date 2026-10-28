@@ -46,7 +46,7 @@ That's it. Run `claude-s` instead of `claude` in each project and the status ico
 
 | | Status | When |
 |---|---|---|
-| 🟠 | **needs input** | Claude is asking for permission or waiting for your answer |
+| 🟠 | **needs input** | Claude is waiting for your approval or answer (see [Approval alerts](#approval-alerts)) |
 | 🔴 | **retry** | Two or more tool failures in a row, or an API error |
 | 🔵 | **in progress** | Working on your prompt |
 | ⚪ | **sleeping** | New session, idle, or no activity for 3+ minutes |
@@ -54,11 +54,37 @@ That's it. Run `claude-s` instead of `claude` in each project and the status ico
 
 Sessions disappear from the board as soon as their Claude process exits. Agents that need you (🟠 🔴) are always listed first.
 
+## Approval alerts
+
+When a session asks for permission, every surface shows it, together with what it wants to run and how long it has been waiting:
+
+- **Menu bar**: the title turns orange and starts with `⚠ N`; a **Needs your approval** section sits at the top of the menu.
+- **Dashboard and compact window**: an orange banner lists the sessions; the browser tab shows `(N) Approval needed`.
+- **Desktop widget**, **`claude-s status`** and **Stream Deck keys** (`APPROVE?`) show the same list.
+- **macOS notification** when a session starts waiting, also on the lock screen. Turn it off with `claude-s notifications off`.
+
+Agent Status never approves anything. Clicking a session only brings its window to the front, so you answer it there.
+
+## Keep awake while agents work
+
+Locking the screen doesn't stop your agents; the Mac going to sleep does. While at least one agent is working, Agent Status keeps the Mac from idle sleep with macOS's built-in `caffeinate`. The display can still turn off and the screen still locks, and the agents keep running behind the lock screen. One minute after the last agent stops working, normal sleep returns.
+
+The menu bar shows `☕` while the Mac is kept awake. Change the mode with:
+
+| Command | Mode |
+|---|---|
+| `claude-s awake always` | Keep awake while agents work, on battery too (default) |
+| `claude-s awake power` | Only while on the power adapter |
+| `claude-s awake off` | Never |
+| `claude-s awake` | Show the current mode and state |
+
+Closing the lid on battery still puts the Mac to sleep.
+
 ## Where you can see it
 
 ### Menu bar (default)
 
-Counts sit in the menu bar: ⚠ needs input, ↻ retry, ● in progress, ✓ done. Each agent is one row: hover it for details, click it to jump to it. `install.sh` sets this up using the free [SwiftBar](https://swiftbar.app) app.
+Counts sit in the menu bar: ⚠ needs approval, ↻ retry, ● in progress, ✓ done, ☕ keeping the Mac awake. Sessions that need approval are listed first; each agent is one row: hover it for details, click it to jump to it. The menu only shows status: clicking a session is the only action, besides opening the dashboard. The last line shows the keep-awake state. `install.sh` sets this up using the free [SwiftBar](https://swiftbar.app) app.
 
 <img src="docs/images/menubar.png" width="640" alt="Menu-bar dropdown listing agents with colored status dots">
 
@@ -129,6 +155,8 @@ If a click doesn't switch windows, run `claude-s debug`. It shows where each ses
 | `claude-s status` | Show the board in the terminal |
 | `claude-s focus 3` | Jump to the agent in slot 3 |
 | `claude-s open` | Open the dashboard only |
+| `claude-s awake [always\|power\|off]` | Show or set the keep-awake mode |
+| `claude-s notifications on\|off` | Turn approval notifications on or off |
 | `claude-s doctor` | Check the setup and macOS permissions |
 | `claude-s debug` | Show where each session runs and what the last clicks did, with exact errors |
 | `claude-s restart` / `stop` | Restart or stop the background service |
@@ -184,7 +212,7 @@ No dependencies beyond Node.js. The service listens on `127.0.0.1` only and reje
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/agents` | All agents and counts per status |
+| `GET /api/agents` | All agents, counts per status, pending `approvals`, `keepAwake` state and `config` |
 | `GET /api/stream` | Server-sent events, pushed on every change |
 | `GET /api/slot/N` | One slot as JSON |
 | `GET /api/slot/N.svg` | 144×144 key image for slot N |
@@ -193,12 +221,16 @@ No dependencies beyond Node.js. The service listens on `127.0.0.1` only and reje
 | `POST /api/agents/:id/dismiss` | Remove an agent from the board |
 | `POST /api/clear` | Clear agents by status, e.g. `{"statuses":["done"]}` |
 | `GET /api/swiftbar` | Menu text in SwiftBar / xbar format |
+| `GET /api/config` | Settings: `keepAwake` (`always` · `power` · `off`), `systemNotifications` (`true` · `false`) |
+| `POST /api/config` | Change settings, e.g. `{"keepAwake":"power"}`; saved to `config.json` |
 
 POST requests must use `Content-Type: application/json`.
 
 ## Configuration
 
-Set these in your shell environment:
+Settings changed with `claude-s awake`, `claude-s notifications` or the menu are saved in `~/.claude/agent-status/config.json`.
+
+These environment variables are read when the service starts:
 
 | Variable | Default | |
 |---|---|---|
@@ -218,6 +250,7 @@ Run `claude-s doctor` first. It checks the setup, restarts the service, tests th
 
 ## Limitations
 
+- Keep awake can't prevent sleep when the lid is closed on battery power.
 - Shows Claude Code sessions on this computer only. Cloud sessions and claude.ai chats don't run local hooks.
 - Claude Code has no "retry" event, so **retry** is inferred from repeated tool failures.
 - JetBrains support is in beta: with several projects open, the click may not always land on the right project.
