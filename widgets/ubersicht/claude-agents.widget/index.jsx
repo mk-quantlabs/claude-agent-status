@@ -74,7 +74,7 @@ export const render = ({ output }) => {
               <div className={row}>
                 <span className={slot}>{a.slot}</span>
                 <span style={{ width: 9, height: 9, borderRadius: 9, background: "#F5A524", flex: "none" }} />
-                <span className={name}>{a.project}</span>
+                <span className={name}>{a.name || a.project}</span>
                 <span className={label} style={{ color: "#F5A524" }}>{ago(a.since)}</span>
               </div>
               <div className={detail}>{a.detail}</div>
@@ -87,7 +87,7 @@ export const render = ({ output }) => {
         <div key={a.id} className={row} onClick={() => focus(a.id)} title={a.detail}>
           <span className={slot}>{a.slot}</span>
           <span style={{ width: 9, height: 9, borderRadius: 9, background: a.color, flex: "none" }} />
-          <span className={name}>{a.project}</span>
+          <span className={name}>{a.name || a.project}</span>
           <span className={label} style={{ color: a.color }}>{a.label}</span>
         </div>
       ))}

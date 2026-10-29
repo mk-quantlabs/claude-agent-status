@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '23 4 * * *'   # daily, so a new Claude Code release that changes its hooks fails here first
+  workflow_dispatch:
 
 jobs:
   check:
@@ -20,7 +23,7 @@ jobs:
       - name: Syntax
         run: |
           find . -name '*.js' -not -path './node_modules/*' -exec node --check {} \;
-          bash -n bin/claude-s install.sh uninstall.sh widgets/swiftbar/*.sh
+          bash -n bin/claude-s install.sh uninstall.sh widgets/swiftbar/*.sh tests/*.sh packaging/homebrew/*.sh
           for f in $(find . -name '*.json' -not -path './node_modules/*'); do node -e "JSON.parse(require('fs').readFileSync('$f'))"; done
 
       - name: Validate plugin and marketplace manifests
@@ -37,8 +40,15 @@ jobs:
           node tests/keepawake.test.js
           bash tests/keepawake.integration.sh
 
+      - name: Notification, compatibility and self-update tests
+        run: |
+          node tests/notifications.test.js
+          bash tests/notifications.integration.sh
+
       - name: Launcher and installer tests
-        run: bash tests/launcher.test.sh
+        run: |
+          bash tests/launcher.test.sh
+          bash tests/homebrew.layout.test.sh
 
       - name: Smoke test (hook -> service -> API)
         env:
@@ -56,3 +66,18 @@ jobs:
             console.log("ok:", a.project, a.status);'
           bin/claude-s status
           bin/claude-s stop
+
+  claude-code:
+    name: latest Claude Code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the latest Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Real Claude Code session with the plugin (local stand-in API, no network)
+        run: bash tests/claude-code.e2e.sh
+      - name: Real interactive session - permission prompt, Esc, quit
+        run: python3 tests/claude-code.interactive.py

@@ -47,6 +47,11 @@ node tests/navigation.test.js       # window / tab matching for every supported 
 node tests/keepawake.test.js        # keep-awake decisions, approvals, settings
 bash tests/keepawake.integration.sh # keep-awake and approvals against a running service
 bash tests/launcher.test.sh         # claude-s launch, install.sh / uninstall.sh plugin steps
+node tests/notifications.test.js    # notification rules, settings, hook compatibility record
+bash tests/notifications.integration.sh  # notifications, compatibility record, self-restart on update
+bash tests/homebrew.layout.test.sh  # Homebrew layout: setup, menu paths, upgrade
+bash tests/claude-code.e2e.sh       # a real Claude Code session (needs `claude`; local stand-in API)
+python3 tests/claude-code.interactive.py  # a real interactive session: permission prompt, Esc, quit
 bash -n bin/claude-s install.sh uninstall.sh
 claude plugin validate .            # if you have Claude Code installed
 ```

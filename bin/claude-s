@@ -29,8 +29,18 @@ need_mac() { is_mac || { warn "'$1' works on macOS only"; return 1; }; }
 
 # ---------- service ----------
 daemon_up() { curl -s --max-time 1 "$URL/health" >/dev/null 2>&1; }
+# True when the running service is from before 0.3 (no version in /health): it can't hand
+# over to new code by itself, so it is restarted. Later versions update themselves.
+daemon_outdated() {
+  { curl -s --max-time 1 "$URL/health" 2>/dev/null || true; } | node -e '
+    try { const h = JSON.parse(require("fs").readFileSync(0, "utf8")); process.exit(h.ok && !h.version ? 0 : 1); }
+    catch { process.exit(1); }'
+}
 ensure_daemon() {
-  daemon_up && return 0
+  if daemon_up; then
+    daemon_outdated || return 0
+    kill_daemon
+  fi
   # Starts the service as a detached process in its own session.
   node -e 'require("child_process").spawn(process.execPath, [process.argv[1]], { detached: true, stdio: "ignore" }).unref()' "$PLUGIN/server/server.js"
   for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 0.2; daemon_up && return 0; done
@@ -141,15 +151,17 @@ act_status() {
     const ap = d.approvals || [];
     if (ap.length) {
       console.log(`\x1b[33m⚠ ${ap.length === 1 ? "1 session needs" : ap.length + " sessions need"} your approval\x1b[0m`);
-      for (const a of ap) console.log(`   \x1b[33m${a.slot}. ${a.project}\x1b[0m  ${a.detail.slice(0, 70)}  \x1b[2m${ago(a.since)}\x1b[0m`);
+      for (const a of ap) console.log(`   \x1b[33m${a.slot}. ${a.name || a.project}\x1b[0m  ${a.detail.slice(0, 70)}  \x1b[2m${ago(a.since)}\x1b[0m`);
       console.log("");
     }
     if (!d.agents.length) console.log("\x1b[2mno agents\x1b[0m");
-    const w = Math.max(...d.agents.map((a) => a.project.length), 7);
+    const nm = (a) => a.name || a.project;
+    const w = Math.max(...d.agents.map((a) => nm(a).length), 7);
     for (const a of d.agents) {
       const col = C[a.status] || 0;
-      console.log(`${String(a.slot).padStart(2)}  \x1b[${col}m●\x1b[0m ${a.project.padEnd(w)}  \x1b[${col}m${a.label.padEnd(11)}\x1b[0m ${ago(a.since).padStart(6)}  \x1b[2m${(a.detail || "").slice(0, 60)}\x1b[0m`);
+      console.log(`${String(a.slot).padStart(2)}  \x1b[${col}m●\x1b[0m ${nm(a).padEnd(w)}  \x1b[${col}m${a.label.padEnd(11)}\x1b[0m ${ago(a.since).padStart(6)}  \x1b[2m${(a.detail || "").slice(0, 60)}\x1b[0m`);
     }
+    if ((d.idle || []).length) console.log(`\x1b[2m+${d.idle.length} idle (no activity for ${d.config.hideIdleHours} h): ${d.idle.map(nm).join(", ")}\x1b[0m`);
     const k = d.keepAwake;
     if (k) console.log(k.active ? `\n☕ keeping the Mac awake (${k.reason})` : `\n\x1b[2msleep allowed (${k.reason}) · mode: ${k.mode}\x1b[0m`);'
 }
@@ -160,10 +172,39 @@ act_awake() {
   node "$PLUGIN/server/ctl.js" awake ${1:+"$1"}
 }
 
-# System notifications for approvals: on | off.
+# Notification settings: shows them, or changes them (see ctl.js for the arguments).
 act_notifications() {
   ensure_daemon || return 1
-  node "$PLUGIN/server/ctl.js" notifications "${1:-}"
+  node "$PLUGIN/server/ctl.js" notifications "$@"
+}
+
+# Claude Code version and what the hooks have sent: event counts and anything unexpected.
+# Returns 1 when something unexpected arrived.
+act_compat() {
+  local ok="${c_g}✓${c_0}" bad="${c_r}✗${c_0}" warn="${c_b}!${c_0}" ver
+  if command -v claude >/dev/null; then
+    ver="$(claude --version 2>/dev/null | head -n 1 || true)"
+    echo "$ok Claude Code ${ver:-version unknown}"
+  fi
+  { node "$PLUGIN/server/ctl.js" compat 2>/dev/null || true; } | node -e '
+    const ok = process.argv[1], bad = process.argv[2], warn = process.argv[3];
+    let d; try { d = JSON.parse(require("fs").readFileSync(0, "utf8")); } catch { console.log(`${warn} Hook record not available (service not running?)`); process.exit(0); }
+    const ago = (t) => { const s = Math.floor((Date.now() - t) / 1000); return s < 60 ? s + " s" : s < 3600 ? Math.floor(s / 60) + " min" : s < 86400 ? Math.floor(s / 3600) + " h" : Math.floor(s / 86400) + " d"; };
+    const ev = Object.entries(d.events || {});
+    if (!ev.length) console.log(`${warn} No hook events received yet with this version: start a session, send it a prompt, then run claude-s doctor again`);
+    else {
+      const last = Math.max(...ev.map(([, e]) => e.lastAt));
+      console.log(`${ok} Hook events received (last ${ago(last)} ago): ${ev.map(([n, e]) => n + " " + e.count).join(" · ")}`);
+    }
+    const nt = Object.entries(d.notificationTypes || {});
+    if (nt.length) console.log(`  Notification types: ${nt.map(([n, e]) => n + " " + e.count).join(" · ")}`);
+    const pr = d.problems || [];
+    for (const p of pr) console.log(`${bad} ${p.text}`);
+    if (pr.length) {
+      console.log("  Claude Code may have changed what its hooks send. Update Agent Status (git pull, or brew upgrade agent-status);");
+      console.log("  if this stays, please open an issue with this output.");
+      process.exit(1);
+    }' "$ok" "$bad" "$warn"
 }
 
 act_focus() {
@@ -247,6 +288,12 @@ act_doctor() {
   node "$PLUGIN/server/ctl.js" awake | sed 's/^/  /'
   if is_mac && ! command -v caffeinate >/dev/null; then echo "$bad caffeinate not found"; fails=1; fi
 
+  echo; echo "${c_b}Notifications${c_0}"
+  node "$PLUGIN/server/ctl.js" notifications | sed 's/^/  /' || true
+
+  echo; echo "${c_b}Claude Code compatibility${c_0}"
+  act_compat || fails=1
+
   echo
   if [ "$fails" = 0 ]; then echo "${c_g}All good.${c_0} Click an agent in the menu bar to jump to it."
   else echo "Fix the ${c_r}✗${c_0} items above, then run ${c_b}claude-s doctor${c_0} again."; fi
@@ -269,7 +316,8 @@ ${c_b}Without starting Claude${c_0}:
   claude-s focus 3             jump to agent in slot 3
   claude-s open                open the dashboard only
   claude-s awake [always|power|off]   keep the Mac awake while agents work (shows / sets the mode)
-  claude-s notifications on|off      system notifications when a session needs approval
+  claude-s notifications [on|off]    notification settings (also: done on|off|MIN, remind MIN|off, sound on|off)
+  claude-s hide-idle [HOURS|off]     hide sessions idle this long from the menu (default 6)
   claude-s doctor              check setup and macOS permissions
   claude-s debug               where each session runs + what the last clicks did (exact errors)
   claude-s restart | stop      restart / stop the daemon
@@ -282,7 +330,7 @@ EOF
 }
 
 # ---------- argument parsing ----------
-actions=(); standalone=""; focus_arg=""; no_claude=0
+actions=(); standalone=""; focus_arg=""; no_claude=0; rest=()
 while [ $# -gt 0 ]; do
   case "$1" in
     dashboard|dash|web)      actions+=(dashboard) ;;
@@ -297,7 +345,8 @@ while [ $# -gt 0 ]; do
     restart)                 standalone=restart ;;
     doctor|check)            standalone=doctor ;;
     awake)                   standalone=awake; shift; focus_arg="${1:-}" ;;
-    notifications)           standalone=notifications; shift; focus_arg="${1:-}" ;;
+    notifications|notify)    standalone=notifications; shift; rest=("$@"); break ;;
+    hide-idle)               standalone=hide-idle; shift; rest=("$@"); break ;;
     debug|why)               standalone=debug ;;
     demo)                    standalone=demo ;;
     help|-h|--help)          usage; exit 0 ;;
@@ -314,7 +363,8 @@ case "$standalone" in
   stop)    stop_daemon; exit 0 ;;
   doctor)  act_doctor; exit 0 ;;
   awake)   act_awake "$focus_arg"; exit $? ;;
-  notifications) act_notifications "$focus_arg"; exit $? ;;
+  notifications) act_notifications "${rest[@]+"${rest[@]}"}"; exit $? ;;
+  hide-idle) ensure_daemon || exit 1; node "$PLUGIN/server/ctl.js" hide-idle "${rest[@]+"${rest[@]}"}"; exit $? ;;
   debug)   act_debug; exit 0 ;;
   restart) stop_daemon; sleep 0.3; ensure_daemon && say "daemon running on $URL/"; exit 0 ;;
   demo)    stop_daemon; say "demo on $URL/  (Ctrl+C to stop)"; exec node "$PLUGIN/server/server.js" --demo ;;

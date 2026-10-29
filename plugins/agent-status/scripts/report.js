@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Claude Code hook: reads the hook payload from stdin, reduces it to the fields the board
-// uses and POSTs it to the local service, starting the service if it isn't running.
+// uses (and the names of expected fields that are absent) and POSTs it to the local service,
+// starting the service if it isn't running.
 // Exits 0 within ~1.5s and prints nothing.
 'use strict';
 const http = require('http');
@@ -11,13 +12,26 @@ const PORT = Number(process.env.AGENT_STATUS_PORT) || 4317;
 const HOST = '127.0.0.1';
 const SERVER = path.join(__dirname, '..', 'server', 'server.js');
 
-setTimeout(() => process.exit(0), 1500).unref();
 
 function clip(s, n) {
   if (s == null) return undefined;
   s = typeof s === 'string' ? s : JSON.stringify(s);
   s = s.replace(/\s+/g, ' ').trim();
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+// Prompt text as shown on the board: a shell command typed with "!" shows as "! command" and a
+// slash command as "/name args", instead of the markup Claude Code wraps them in.
+function promptText(p) {
+  const s = typeof p === 'string' ? p : '';
+  const bash = s.match(/<bash-input>([\s\S]*?)<\/bash-input>/);
+  if (bash) return `! ${bash[1].trim()}`;
+  const cmd = s.match(/<command-name>([\s\S]*?)<\/command-name>/);
+  if (cmd) {
+    const args = s.match(/<command-args>([\s\S]*?)<\/command-args>/);
+    return `${cmd[1].trim()}${args && args[1].trim() ? ` ${args[1].trim()}` : ''}`;
+  }
+  return s;
 }
 
 function toolSummary(name, input) {
@@ -37,36 +51,44 @@ function ttyOfSelf() {
 
 // Walks the process tree (one `ps` call) and returns:
 //  - pid:     the Claude Code process (first ancestor that isn't a shell)
-//  - hostApp: the .app bundle the session runs in (iTerm, PyCharm, VS Code, ...)
+//  - hostApp: the .app bundle the session runs in (iTerm, PyCharm, VS Code, the Claude app, ...)
 //  - hostPid: the main process of that app
 //  - inTmux:  true when the session runs inside tmux
 const SHELLS = /^-?(sh|bash|zsh|dash|fish|ksh|login)$/;
 function processInfo() {
-  const out = {};
   try {
     const table = execFileSync('ps', ['-axo', 'pid=,ppid=,comm='], { encoding: 'utf8', timeout: 600, maxBuffer: 8 << 20 });
-    const procs = new Map();
-    for (const line of table.split('\n')) {
-      const m = line.match(/^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/);
-      if (m) procs.set(Number(m[1]), { ppid: Number(m[2]), comm: m[3] });
+    return walkProcesses(table, process.ppid);
+  } catch { return {}; }
+}
+
+// The walk behind processInfo(): `table` is `ps -axo pid=,ppid=,comm=` output, `start` the
+// hook's parent process.
+function walkProcesses(table, start) {
+  const out = {};
+  const procs = new Map();
+  for (const line of String(table).split('\n')) {
+    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/);
+    if (m) procs.set(Number(m[1]), { ppid: Number(m[2]), comm: m[3] });
+  }
+  let pid = start;
+  for (let i = 0; i < 30 && pid > 1; i++) {
+    const p = procs.get(pid);
+    if (!p) break;
+    if (!out.pid && !SHELLS.test(path.basename(p.comm))) out.pid = pid;
+    const app = p.comm.match(/^(\/.*?\.app)\/Contents\//);
+    // The session's own process can be packaged as an app (the Claude desktop app runs Claude
+    // Code from .../claude-code/<version>/claude.app); the host is the app above it.
+    if (app && pid !== out.pid) {
+      // Topmost process of the same bundle (the app's main process).
+      out.hostApp = app[1]; out.hostPid = pid;
+      for (let q = procs.get(p.ppid), qpid = p.ppid; q && q.comm.startsWith(app[1] + '/'); qpid = q.ppid, q = procs.get(q.ppid)) out.hostPid = qpid;
+      break;
     }
-    let pid = process.ppid;
-    for (let i = 0; i < 30 && pid > 1; i++) {
-      const p = procs.get(pid);
-      if (!p) break;
-      if (!out.pid && !SHELLS.test(path.basename(p.comm))) out.pid = pid;
-      const app = p.comm.match(/^(\/.*?\.app)\/Contents\//);
-      if (app) {
-        // Topmost process of the same bundle (the app's main process).
-        out.hostApp = app[1]; out.hostPid = pid;
-        for (let q = procs.get(p.ppid), qpid = p.ppid; q && q.comm.startsWith(app[1] + '/'); qpid = q.ppid, q = procs.get(q.ppid)) out.hostPid = qpid;
-        break;
-      }
-      if (/iTermServer/.test(p.comm)) { out.hostApp = 'iTerm2'; break; } // iTerm2 session server
-      if (/(^|\/)tmux/.test(path.basename(p.comm))) { out.inTmux = true; break; }
-      pid = p.ppid;
-    }
-  } catch { /* ignore */ }
+    if (/iTermServer/.test(p.comm)) { out.hostApp = 'iTerm2'; break; } // iTerm2 session server
+    if (/(^|\/)tmux/.test(path.basename(p.comm))) { out.inTmux = true; break; }
+    pid = p.ppid;
+  }
   return out;
 }
 
@@ -117,6 +139,17 @@ function location(cwd) {
   };
 }
 
+// Payload fields the board relies on, per event. Absent ones are reported as `missing`.
+const EXPECTED = {
+  SessionStart: ['cwd', 'source', 'transcript_path'],
+  UserPromptSubmit: ['cwd', 'prompt', 'transcript_path'],
+  PreToolUse: ['tool_name', 'tool_input'],
+  PostToolUse: ['tool_name'],
+  PostToolUseFailure: ['tool_name'],
+  Notification: ['notification_type', 'message'],
+  StopFailure: ['error'],
+};
+
 function build(h) {
   const ev = h.hook_event_name;
   const out = {
@@ -126,31 +159,49 @@ function build(h) {
     ts: Date.now(),
   };
   switch (ev) {
-    case 'SessionStart': out.source = h.source; out.loc = location(out.cwd); break;
-    case 'UserPromptSubmit': out.prompt = clip(h.prompt, 160); out.loc = location(out.cwd); break;
-    case 'PreToolUse': out.tool = h.tool_name; out.detail = toolSummary(h.tool_name, h.tool_input); break;
+    case 'SessionStart': out.source = h.source; out.loc = location(out.cwd); out.transcript = h.transcript_path; break;
+    case 'UserPromptSubmit': out.prompt = clip(promptText(h.prompt), 160); out.loc = location(out.cwd); out.transcript = h.transcript_path; break;
+    case 'PreToolUse': out.tool = h.tool_name; out.detail = toolSummary(h.tool_name, h.tool_input); out.tool_use_id = clip(h.tool_use_id, 100); break;
     case 'PostToolUse': out.tool = h.tool_name; break;
     case 'PostToolUseFailure':
       out.tool = h.tool_name; out.error = clip(h.error, 200); out.is_interrupt = !!h.is_interrupt; break;
     case 'Notification':
       out.notification_type = h.notification_type; out.message = clip(h.message, 200); break;
-    case 'StopFailure': out.error = clip(h.error || h.message || h.reason, 200); break;
+    case 'StopFailure':
+      out.error = clip(h.error, 60);
+      out.message = clip(h.last_assistant_message || h.message, 200);
+      break;
     case 'SubagentStart': case 'SubagentStop': out.agent_type = h.agent_type; out.agent_id = h.agent_id; break;
     case 'SessionEnd': out.reason = h.reason; break;
   }
+  const missing = (EXPECTED[ev] || []).filter((k) => h[k] === undefined || h[k] === null);
+  if (missing.length) out.missing = missing;
   return out;
 }
 
+// Sends the event. Resolves with { version } of the service that took it, or null.
 function post(body) {
   return new Promise((resolve) => {
     const data = Buffer.from(JSON.stringify(body));
     const req = http.request({
       host: HOST, port: PORT, path: '/event', method: 'POST', timeout: 400,
       headers: { 'Content-Type': 'application/json', 'Content-Length': data.length },
-    }, (res) => { res.resume(); resolve(true); });
-    req.on('error', () => resolve(false));
-    req.on('timeout', () => { req.destroy(); resolve(false); });
+    }, (res) => { res.resume(); resolve({ version: res.headers['x-agent-status-version'] || null }); });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
     req.end(data);
+  });
+}
+
+function health() {
+  return new Promise((resolve) => {
+    const req = http.get({ host: HOST, port: PORT, path: '/health', timeout: 300 }, (res) => {
+      let b = '';
+      res.on('data', (c) => { b += c; });
+      res.on('end', () => { try { resolve(JSON.parse(b)); } catch { resolve(null); } });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
   });
 }
 
@@ -161,18 +212,49 @@ function startDaemon() {
   } catch { /* ignore */ }
 }
 
-let raw = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (c) => { raw += c; });
-process.stdin.on('end', async () => {
-  let h;
-  try { h = JSON.parse(raw); } catch { process.exit(0); }
-  if (!h || !h.session_id || !h.hook_event_name) process.exit(0);
-  const body = build(h);
-  if (!(await post(body))) {
-    startDaemon();
-    await new Promise((r) => setTimeout(r, 450));
-    await post(body);
+// A service from before 0.3 (its /health has no version) can't hand over to new code by
+// itself: it is stopped, which saves its state, and this version is started in its place.
+// Services from 0.3 on update themselves when their code changes.
+async function replaceIfPre03(serviceVersion) {
+  if (serviceVersion) return;
+  const h = await health();
+  if (!h || h.version || !Number.isInteger(h.pid)) return;
+  try { process.kill(h.pid, 'SIGTERM'); } catch { return; }
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 60));
+    try { process.kill(h.pid, 0); } catch { break; }
   }
-  process.exit(0);
-});
+  startDaemon();
+}
+
+function main() {
+  setTimeout(() => process.exit(0), 1500).unref();
+  let raw = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (c) => { raw += c; });
+  // Any error ends the hook quietly: it must never disturb the session.
+  process.on('uncaughtException', () => process.exit(0));
+  process.on('unhandledRejection', () => process.exit(0));
+  process.stdin.on('end', async () => {
+    let h;
+    try { h = JSON.parse(raw); } catch { process.exit(0); }
+    if (!h || typeof h !== 'object') process.exit(0);
+    // A payload without a session id or event name is reported by its field names only.
+    const body = h.session_id && h.hook_event_name
+      ? build(h)
+      : { event: '_malformed', keys: Object.keys(h).slice(0, 15), ts: Date.now() };
+    const sent = await post(body);
+    if (!sent) {
+      startDaemon();
+      await new Promise((r) => setTimeout(r, 450));
+      await post(body);
+    } else {
+      await replaceIfPre03(sent.version);
+    }
+    process.exit(0);
+  });
+}
+
+if (require.main === module) main();
+
+module.exports = { walkProcesses, build, promptText };

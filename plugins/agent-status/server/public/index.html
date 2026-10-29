@@ -113,6 +113,10 @@ body.compact .card:hover .age { visibility: visible; }
 .approvals.show { display: block; }
 .approvals h3 { margin: 0 0 8px; font-size: 14px; color: var(--waiting); display: flex; align-items: center; gap: 8px; }
 .approvals h3 .dot { --c: var(--waiting); }
+.idle { margin-top: 18px; }
+.idle summary { cursor: pointer; color: var(--muted, #8B8FA3); font-size: 13px; margin-bottom: 10px; }
+.idle .card { opacity: .6; }
+body.compact .idle { display: none; }
 .ap { display: flex; gap: 10px; align-items: baseline; width: 100%; text-align: left; padding: 6px 8px; border-radius: 8px; }
 .ap:hover { background: color-mix(in srgb, var(--waiting) 14%, transparent); }
 .ap b { font-weight: 650; white-space: nowrap; }
@@ -155,7 +159,7 @@ body.compact footer { display: none; }
 </header>
 <section class="approvals" id="approvals" aria-live="polite"></section>
 <div class="banner" id="banner">Daemon is not reachable. It starts automatically with the next Claude Code hook, or run <code>node server/server.js</code>.</div>
-<main><div class="grid" id="grid"></div><div id="empty"></div></main>
+<main><div class="grid" id="grid"></div><details class="idle" id="idle" hidden></details><div id="empty"></div></main>
 <footer>Click a card to jump to its window · <kbd>1</kbd>–<kbd>9</kbd> focus by slot · API: <code>/api/agents</code>, <code>/api/stream</code>, <code>/api/slot/N.svg</code></footer>
 <div class="toast" id="toast"></div>
 
@@ -191,11 +195,9 @@ function renderChips() {
     </button>`).join('');
 }
 
-function renderGrid() {
-  const now = Date.now();
-  const list = state.agents.filter((a) => !filter || a.status === filter);
-  $('total').textContent = state.agents.length ? `${state.agents.length} session${state.agents.length > 1 ? 's' : ''}` : '';
-  $('grid').innerHTML = list.map((a) => `
+// One session card.
+function card(a, now) {
+  return `
     <div class="card ${ALERT.has(a.status) ? 'alert' : ''}" role="button" tabindex="0"
          data-id="${esc(a.id)}" style="--c:var(--${a.status})" title="${esc(a.cwd || '')}">
       <div class="row">
@@ -214,8 +216,22 @@ function renderGrid() {
         <span>started ${dur(now - a.startedAt)} ago</span>
       </div>
       <button class="x" data-dismiss="${esc(a.id)}" title="Remove from board">×</button>
-    </div>`).join('');
-  $('empty').innerHTML = state.agents.length ? '' : `
+    </div>`;
+}
+
+function renderGrid() {
+  const now = Date.now();
+  const list = state.agents.filter((a) => !filter || a.status === filter);
+  $('total').textContent = state.agents.length ? `${state.agents.length} session${state.agents.length > 1 ? 's' : ''}` : '';
+  $('grid').innerHTML = list.map((a) => card(a, now)).join('');
+  // Sessions hidden from the menu because they have been idle for a while.
+  const idle = state.idle || [];
+  const open = $('idle').open;
+  $('idle').hidden = !idle.length;
+  $('idle').innerHTML = idle.length ? `<summary>${idle.length} idle session${idle.length > 1 ? 's' : ''} · no activity for ${state.config.hideIdleHours} h or more</summary>
+    <div class="grid">${idle.map((a) => card(a, now)).join('')}</div>` : '';
+  $('idle').open = open;
+  $('empty').innerHTML = state.agents.length || idle.length ? '' : `
     <div class="empty"><h2>No agents yet</h2>
     Start a Claude Code session with the <code>agent-status</code> plugin enabled and it appears here within a second.</div>`;
   const approvals = (state.approvals || []).length;
@@ -229,8 +245,8 @@ function renderApprovals() {
   $('approvals').classList.toggle('show', list.length > 0);
   $('approvals').innerHTML = list.length ? `
     <h3><span class="dot"></span>${list.length === 1 ? '1 session needs' : list.length + ' sessions need'} your approval</h3>
-    ${list.map((a) => `<button class="ap" data-id="${esc(a.id)}" title="Go to ${esc(a.project)}">
-      <b>${a.slot}. ${esc(a.project)}</b><code>${esc(a.detail)}</code><span data-since="${a.since}">${dur(now - a.since)}</span>
+    ${list.map((a) => `<button class="ap" data-id="${esc(a.id)}" title="Go to ${esc(a.name || a.project)}">
+      <b>${a.slot}. ${esc(a.name || a.project)}</b><code>${esc(a.detail)}</code><span data-since="${a.since}">${dur(now - a.since)}</span>
     </button>`).join('')}` : '';
 }
 
@@ -265,19 +281,21 @@ async function post(url, body) {
 }
 
 async function focusAgent(id) {
-  const a = state.agents.find((x) => x.id === id);
+  const a = [...state.agents, ...(state.idle || [])].find((x) => x.id === id);
   const r = await post(`/api/agents/${encodeURIComponent(id)}/focus`);
   toast(r.ok ? `→ ${a ? a.project : ''} (${r.method})` : `Couldn't locate the window for ${a ? a.project : 'this agent'}`);
 }
 
-$('grid').addEventListener('click', async (e) => {
-  const d = e.target.closest('[data-dismiss]');
-  if (d) { e.stopPropagation(); await post(`/api/agents/${encodeURIComponent(d.dataset.dismiss)}/dismiss`); return; }
-  const c = e.target.closest('.card'); if (c) focusAgent(c.dataset.id);
-});
-$('grid').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && e.target.classList.contains('card')) focusAgent(e.target.dataset.id);
-});
+for (const el of [$('grid'), $('idle')]) {
+  el.addEventListener('click', async (e) => {
+    const d = e.target.closest('[data-dismiss]');
+    if (d) { e.stopPropagation(); await post(`/api/agents/${encodeURIComponent(d.dataset.dismiss)}/dismiss`); return; }
+    const c = e.target.closest('.card'); if (c) focusAgent(c.dataset.id);
+  });
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.classList.contains('card')) focusAgent(e.target.dataset.id);
+  });
+}
 $('approvals').addEventListener('click', (e) => {
   const b = e.target.closest('.ap'); if (b) focusAgent(b.dataset.id);
 });
@@ -294,7 +312,7 @@ $('viewBtn').onclick = () => { compact = !compact; try { localStorage.setItem('a
 document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey || /input|textarea/i.test(e.target.tagName)) return;
   if (/^[1-9]$/.test(e.key)) {
-    const a = state.agents.find((x) => x.slot === Number(e.key));
+    const a = [...state.agents, ...(state.idle || [])].find((x) => x.slot === Number(e.key));
     if (a) focusAgent(a.id);
   }
 });

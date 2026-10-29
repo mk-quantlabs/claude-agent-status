@@ -95,4 +95,46 @@ test('candidate without .idea is ignored',
   () => assert.strictEqual(pickOpenJetBrainsProject([path.join(tmpHome, 'nope')]), null));
 
 fs.rmSync(tmpHome, { recursive: true, force: true });
+// ---------- which app a session runs in (process tree) ----------
+const { walkProcesses } = require('../plugins/agent-status/scripts/report.js');
+const table = (rows) => rows.map(([pid, ppid, comm]) => `${pid} ${ppid} ${comm}`).join('\n');
+const CLAUDE_CLI = '/Users/u/Library/Application Support/Claude/claude-code/2.1.309/5af865b9901c/claude.app/Contents/MacOS/claude';
+test('Claude desktop app: host is the Claude app, not its bundled Claude Code', () => {
+  const t = table([[500, 1, '/Applications/Claude.app/Contents/MacOS/Claude'], [64444, 500, CLAUDE_CLI], [70000, 64444, '/bin/sh']]);
+  assert.deepStrictEqual(walkProcesses(t, 70000), { pid: 64444, hostApp: '/Applications/Claude.app', hostPid: 500 });
+});
+test('Claude desktop app via a helper process: host is the app main process', () => {
+  const t = table([[500, 1, '/Applications/Claude.app/Contents/MacOS/Claude'],
+    [510, 500, '/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper'],
+    [64444, 510, CLAUDE_CLI], [70000, 64444, '/bin/sh']]);
+  assert.deepStrictEqual(walkProcesses(t, 70000), { pid: 64444, hostApp: '/Applications/Claude.app', hostPid: 500 });
+});
+test('IDE terminal: host is the IDE, session is the claude process', () => {
+  const t = table([[62615, 1, '/Users/u/Applications/PyCharm.app/Contents/MacOS/pycharm'], [62700, 62615, '/bin/zsh'],
+    [74175, 62700, 'claude'], [80000, 74175, '/bin/sh']]);
+  assert.deepStrictEqual(walkProcesses(t, 80000), { pid: 74175, hostApp: '/Users/u/Applications/PyCharm.app', hostPid: 62615 });
+});
+test('iTerm2 and tmux are recognised', () => {
+  assert.strictEqual(walkProcesses(table([[300, 1, '/Applications/iTerm.app/Contents/MacOS/iTermServer-3.5'], [310, 300, '-zsh'], [320, 310, 'claude'], [330, 320, '/bin/sh']]), 330).hostApp, '/Applications/iTerm.app');
+  assert.strictEqual(walkProcesses(table([[300, 1, 'tmux'], [310, 300, '-zsh'], [320, 310, 'claude'], [330, 320, '/bin/sh']]), 330).inTmux, true);
+});
+
+// ---------- prompt text on the board ----------
+const { promptText } = require('../plugins/agent-status/scripts/report.js');
+test('a "!" shell command shows as "! command"', () => {
+  assert.strictEqual(promptText('<bash-input>claude --debug</bash-input><bash-stdout>──── lots</bash-stdout><bash-stderr></bash-stderr>'), '! claude --debug');
+});
+test('a slash command shows as "/name args"', () => {
+  assert.strictEqual(promptText('<command-message>review</command-message>\n<command-name>/review</command-name>\n<command-args>#12</command-args>'), '/review #12');
+  assert.strictEqual(promptText('<command-name>/clear</command-name><command-args></command-args>'), '/clear');
+});
+test('plain prompts are unchanged', () => assert.strictEqual(promptText('refactor the parser'), 'refactor the parser'));
+
+// ---------- AppleScript ----------
+test('AppleScript variables never use reserved words (e.g. "kind" breaks selecting a tab)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'agent-status', 'server', 'focus.js'), 'utf8');
+  const bad = src.match(/^\s*set (kind|class|id|name|result|title|text|count|item|window|process|properties|value|version|path) to /gm);
+  assert.deepStrictEqual(bad, null);
+});
+
 console.log(`---- ${passed} passed${process.exitCode ? ', some FAILED' : ''}`);

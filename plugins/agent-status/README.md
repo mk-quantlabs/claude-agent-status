@@ -8,7 +8,7 @@ With the plugin alone you get:
 
 - the web dashboard at http://127.0.0.1:4317 (or `/agent-status:agents` inside Claude Code)
 - the JSON API and live stream (`/api/agents`, `/api/stream`)
-- keep-awake while agents work and approval notifications (macOS)
+- keep-awake while agents work, approval notifications and reminders, and notifications when long tasks finish (macOS)
 
 The menu bar icon, the `claude-s` command, the desktop widget and click-to-jump from the menu bar come with the full install:
 

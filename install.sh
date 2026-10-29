@@ -4,17 +4,23 @@
 #                              the menu-bar icon (macOS)
 #   ./install.sh --no-plugin   skips the Claude Code plugin install (use `claude-s` to start sessions)
 #   ./install.sh --no-menubar  skips the menu-bar icon
+#   ./install.sh --no-alias    doesn't add the claude-s alias (and removes an old one), for
+#                              installs that put claude-s on PATH (Homebrew)
+# AGENT_STATUS_HOME, when set, is the folder registered with Claude Code instead of this
+# script's folder (Homebrew passes its upgrade-proof opt/ path).
 set -euo pipefail
 
-ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${AGENT_STATUS_HOME:-$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 MENUBAR=1
 PLUGIN=1
+ALIAS=1
 PLUGIN_OK=0
 for arg in "$@"; do
   case "$arg" in
     --no-menubar) MENUBAR=0 ;;
     --no-plugin) PLUGIN=0 ;;
-    -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
+    --no-alias) ALIAS=0 ;;
+    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 1 ;;
   esac
 done
@@ -40,7 +46,7 @@ case "$ROOT" in
 esac
 
 # Executable bits
-chmod +x "$ROOT/bin/claude-s" "$ROOT/uninstall.sh" "$ROOT/widgets/swiftbar/"*.sh "$ROOT/plugins/agent-status/scripts/report.js"
+chmod +x "$ROOT/bin/claude-s" "$ROOT/uninstall.sh" "$ROOT/widgets/swiftbar/"*.sh "$ROOT/plugins/agent-status/scripts/report.js" 2>/dev/null || true
 
 # claude-s alias in the shell config file
 shell_name="$(basename "${SHELL:-zsh}")"
@@ -54,11 +60,14 @@ if [ -n "$rc" ]; then
   touch "$rc"
   if grep -q "alias claude-s=" "$rc"; then
     tmp="$(mktemp)"; { grep -v "alias claude-s=" "$rc" || true; } > "$tmp"; cat "$tmp" > "$rc"; rm -f "$tmp"
+    [ "$ALIAS" = 0 ] && ok "Removed the old claude-s alias from $rc"
   fi
-  if [ -s "$rc" ] && [ -n "$(tail -c1 "$rc")" ]; then echo >> "$rc"; fi
-  echo "$line" >> "$rc"
-  ok "Added the claude-s command to $rc"
-else
+  if [ "$ALIAS" = 1 ]; then
+    if [ -s "$rc" ] && [ -n "$(tail -c1 "$rc")" ]; then echo >> "$rc"; fi
+    echo "$line" >> "$rc"
+    ok "Added the claude-s command to $rc"
+  fi
+elif [ "$ALIAS" = 1 ]; then
   note "Unknown shell ($shell_name). Add this line to your shell config yourself:"
   echo "    $line"
 fi
@@ -82,13 +91,22 @@ elif [ "$MENUBAR" = 1 ]; then
   note "Menu-bar icon is macOS-only; use the dashboard instead (claude-s open)"
 fi
 
+# A running background service is restarted, so it runs the code installed here.
+if curl -s --max-time 1 "http://127.0.0.1:${AGENT_STATUS_PORT:-4317}/health" >/dev/null 2>&1; then
+  "$ROOT/bin/claude-s" restart >/dev/null 2>&1 && ok "Restarted the background service"
+fi
+
 echo
 if [ "$PLUGIN_OK" = 1 ]; then
   echo "${b}Done.${n} Start Claude as usual in any project:"
   echo
   echo "    ${b}claude${n}"
   echo
-  echo "Helper commands (open a new terminal or run: source $rc): claude-s status, claude-s awake, claude-s help"
+  if [ "$ALIAS" = 1 ]; then
+    echo "Helper commands (open a new terminal or run: source $rc): claude-s status, claude-s awake, claude-s help"
+  else
+    echo "Helper commands: claude-s status, claude-s notifications, claude-s help"
+  fi
 else
   echo "${b}Done.${n} Open a new terminal (or run: source $rc), then start Claude with:"
   echo
