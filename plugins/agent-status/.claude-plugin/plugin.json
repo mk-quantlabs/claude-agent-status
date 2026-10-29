@@ -1,9 +1,11 @@
 {
   "name": "agent-status",
-  "version": "0.2.1",
-  "description": "Live status board for all running Claude Code agents with click-to-focus, approval alerts and keep-awake while agents work. Menu bar, web dashboard, desktop widget and a Stream Deck-ready API.",
-  "author": { "name": "Agent Status contributors" },
+  "displayName": "Agent Status",
+  "version": "0.2.2",
+  "description": "See all your running Claude Code sessions in one place: which ones need your approval, which are working and which are done. Click one to jump to its terminal tab or IDE window, get a notification when a session waits for permission, and keep your Mac awake while agents work. Menu bar, local web dashboard, desktop widget and a Stream Deck-ready API.",
+  "author": { "name": "Agent Status contributors", "url": "https://github.com/mk-quantlabs" },
+  "homepage": "https://github.com/mk-quantlabs/claude-agent-status#readme",
+  "repository": "https://github.com/mk-quantlabs/claude-agent-status",
   "license": "MIT",
-  "keywords": ["status", "dashboard", "menubar", "multi-agent", "hooks", "stream-deck"],
-  "icon": "./.claude-plugin/icon.png"
+  "keywords": ["status", "dashboard", "menubar", "multi-agent", "parallel-sessions", "notifications", "approvals", "keep-awake", "macos", "hooks", "stream-deck"]
 }
