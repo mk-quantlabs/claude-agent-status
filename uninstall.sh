@@ -30,4 +30,7 @@ if [ "$(uname)" = "Darwin" ]; then
 fi
 
 rm -rf "${AGENT_STATUS_DIR:-$HOME/.claude/agent-status}" && ok "Removed saved state"
-echo "Done. You can now delete this folder."
+case "$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)" in
+  */Cellar/*) echo "Done. Remove the program with: brew uninstall agent-status" ;;
+  *) echo "Done. You can now delete this folder." ;;
+esac

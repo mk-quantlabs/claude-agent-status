@@ -66,7 +66,10 @@ test('notification text', () => {
 });
 
 // ---------- settings ----------
-test('defaults: keep awake always, notifications on', () => assert.deepStrictEqual(settings.DEFAULTS, { keepAwake: 'always', systemNotifications: true }));
+test('defaults: keep awake always, notifications on', () => {
+  assert.strictEqual(settings.DEFAULTS.keepAwake, 'always');
+  assert.strictEqual(settings.DEFAULTS.systemNotifications, true);
+});
 test('valid settings accepted', () => assert.deepStrictEqual(settings.validate({ keepAwake: 'power', systemNotifications: false }).value, { keepAwake: 'power', systemNotifications: false }));
 test('invalid mode rejected', () => assert.ok(settings.validate({ keepAwake: 'sometimes' }).error));
 test('non-boolean notifications rejected', () => assert.ok(settings.validate({ systemNotifications: 'yes' }).error));
@@ -74,9 +77,9 @@ test('unknown key rejected', () => assert.ok(settings.validate({ foo: 1 }).error
 test('save + load round trip; invalid saved values ignored', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-status-cfg-'));
   settings.save(dir, { keepAwake: 'off', systemNotifications: false });
-  assert.deepStrictEqual(settings.load(dir), { keepAwake: 'off', systemNotifications: false });
+  assert.deepStrictEqual(settings.load(dir), { ...settings.DEFAULTS, keepAwake: 'off', systemNotifications: false });
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ keepAwake: 'bogus', systemNotifications: false, extra: 1 }));
-  assert.deepStrictEqual(settings.load(dir), { keepAwake: 'always', systemNotifications: false });
+  assert.deepStrictEqual(settings.load(dir), { ...settings.DEFAULTS, keepAwake: 'always', systemNotifications: false });
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

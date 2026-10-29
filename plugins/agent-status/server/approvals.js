@@ -1,13 +1,15 @@
 // Pending approvals: sessions waiting for a permission decision.
 'use strict';
-const { execFile } = require('child_process');
 
-// Notification types that mean "a permission decision is needed".
-const APPROVAL_TYPES = new Set(['permission_prompt', 'elicitation_dialog']);
+// Notification types that mean the session is blocked until the user answers: a permission
+// prompt, an MCP elicitation form or link, or another dialog that needs input.
+const APPROVAL_TYPES = new Set(['permission_prompt', 'elicitation_dialog', 'elicitation_url_dialog', 'agent_needs_input']);
 
-// What is being approved: the last tool call summary of the session, else the notification text.
-function approvalFor(agent, message, since) {
-  return { detail: agent.lastToolDetail || message || 'Needs your input', since };
+// What is being asked: for a permission prompt the last tool call of the session, otherwise
+// the notification text.
+function approvalFor(agent, message, since, type) {
+  const detail = type === 'permission_prompt' || !type ? agent.lastToolDetail || message : message || agent.lastToolDetail;
+  return type ? { detail: detail || 'Needs your input', since, type } : { detail: detail || 'Needs your input', since };
 }
 
 // Agents waiting for approval, oldest first.
@@ -23,11 +25,4 @@ function notificationText(agent) {
   return { title: `Approval needed · ${agent.project}`, body: (agent.approval && agent.approval.detail) || 'Needs your input' };
 }
 
-// Shows a macOS notification (Notification Center and lock screen). No-op on other platforms.
-function notify({ title, body }) {
-  if (process.platform !== 'darwin') return;
-  const script = 'on run argv\n  display notification (item 2 of argv) with title (item 1 of argv)\nend run';
-  execFile('osascript', ['-e', script, String(title).slice(0, 120), String(body).slice(0, 200)], { timeout: 5000 }, () => {});
-}
-
-module.exports = { APPROVAL_TYPES, approvalFor, approvalsList, notificationText, notify };
+module.exports = { APPROVAL_TYPES, approvalFor, approvalsList, notificationText };

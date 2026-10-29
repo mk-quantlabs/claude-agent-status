@@ -114,13 +114,13 @@ end run`;
 
 const SELECT_WINDOW = `on run argv
   set thePid to (item 1 of argv) as integer
-  set kind to item 2 of argv
+  set targetKind to item 2 of argv
   set wi to (item 3 of argv) as integer
   tell application "System Events"
     set p to first process whose unix id is thePid
     set frontmost of p to true
     set w to window wi of p
-    if kind is "tab" then
+    if targetKind is "tab" then
       perform action "AXPress" of radio button ((item 5 of argv) as integer) of tab group ((item 4 of argv) as integer) of w
     end if
     perform action "AXRaise" of w
