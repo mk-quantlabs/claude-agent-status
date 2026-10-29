@@ -27,6 +27,14 @@
 - **Know when an agent needs you**: approval requests show up everywhere, even as a notification on the lock screen
 - **Agents keep working while your Mac is locked**: no idle sleep while an agent is working; normal sleep returns when they're done
 
+## How you'd use it
+
+**Run many sessions in parallel.** You have five Claude Code sessions across iTerm2 tabs and IDE windows. One stops to ask for permission to run a command. You get a notification, see in the menu bar which session is waiting and for what, click it, and you're back in that exact terminal tab to answer.
+
+**Start a long refactor and walk away.** The screen locks, but the Mac doesn't go to sleep while the agent is still working, so the task finishes. One minute after it's done, normal sleep returns.
+
+**Keep an eye on everything.** Keep the dashboard open on a second monitor, or use Stream Deck keys, to see at a glance which agents are working, which are done and ready for the next prompt, and which hit repeated errors and need a look.
+
 ---
 
 ## Quick start
