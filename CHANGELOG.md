@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Homebrew formula: uses the Node.js already on your PATH instead of depending on Homebrew's `node`, which could install a second copy or build it from source.
+
 ## 0.3.0
 
 - **Notifications when long tasks end**: *Done · project: finished after 24 min* when a task of 5+ minutes finishes, *Stopped with an error* when it ends with an API error. `claude-s notifications done on|off|MIN`.

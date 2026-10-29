@@ -7,7 +7,8 @@ class AgentStatus < Formula
   sha256 "{{SHA256}}"
   license "MIT"
 
-  depends_on "node"
+  # Runs on the Node.js already on PATH (18 or newer; nodejs.org, nvm, Homebrew…). Depending on
+  # Homebrew's node would install a second copy, or build it from source.
 
   def install
     libexec.install Dir["*"], ".claude-plugin"
@@ -25,12 +26,14 @@ class AgentStatus < Formula
 
   def caveats
     <<~EOS
+      Needs Node.js 18 or newer on your PATH (from nodejs.org, nvm, or `brew install node`).
+
       Finish the setup (adds the plugin to Claude Code and the menu-bar icon):
         agent-status-setup
 
       Then start Claude as usual: claude
       After `brew upgrade agent-status` nothing else is needed: new sessions use the new
-      version and the background service restarts itself.
+      version and the background service hands over to it by itself.
 
       Before `brew uninstall agent-status`, run: agent-status-uninstall
     EOS
@@ -38,6 +41,6 @@ class AgentStatus < Formula
 
   test do
     assert_match "claude-s", shell_output("#{bin}/claude-s help")
-    system Formula["node"].opt_bin/"node", "--check", libexec/"plugins/agent-status/server/server.js"
+    assert_path_exists libexec/"plugins/agent-status/.claude-plugin/plugin.json"
   end
 end
