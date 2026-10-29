@@ -23,6 +23,12 @@ jobs:
           bash -n bin/claude-s install.sh uninstall.sh widgets/swiftbar/*.sh
           for f in $(find . -name '*.json' -not -path './node_modules/*'); do node -e "JSON.parse(require('fs').readFileSync('$f'))"; done
 
+      - name: Validate plugin and marketplace manifests
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          npx -y @anthropic-ai/claude-code plugin validate --strict ./plugins/agent-status
+          npx -y @anthropic-ai/claude-code plugin validate --strict .
+
       - name: Navigation tests (which window / tab belongs to a session)
         run: node tests/navigation.test.js
 

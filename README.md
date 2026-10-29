@@ -5,8 +5,9 @@
 <h1 align="center">Agent Status for Claude Code</h1>
 
 <p align="center">
-  See all your Claude Code sessions in one place, know when one needs you,<br>
-  and let them keep working while your Mac is locked. Click one and you're back in its window.
+  A Claude Code plugin that shows all your running sessions in one place: which ones need your approval,<br>
+  which are working and which are done. Click one and you're back in its terminal tab or IDE window,<br>
+  and your agents keep working while your Mac is locked.
 </p>
 
 <p align="center">
@@ -273,20 +274,38 @@ Run `claude-s doctor` first. It checks the setup, restarts the service, tests th
 
 ## FAQ
 
-**Do agents keep running when I lock my Mac?**
-Yes. Locking never stops them; sleep does. While an agent works, Agent Status keeps the Mac from idle sleep, so you can lock it and walk away. Closing the lid on battery still sleeps the Mac.
+### How do I see all my running Claude Code sessions at once?
+Install Agent Status. Every Claude Code session reports its state through hooks, and the menu bar lists each one as needs approval, retry, in progress, sleeping or done. `claude-s open` shows the same in a local web dashboard, and `claude-s status` in the terminal.
 
-**Can I approve a request from the menu bar?**
+### How do I get notified when Claude Code needs permission?
+Agent Status sends a macOS notification the moment a session starts waiting for approval, also on the lock screen, and lists waiting sessions first on every surface, with the command they want to run. Turn the notification off with `claude-s notifications off`.
+
+### How do I switch between multiple Claude Code sessions quickly?
+Click a session in the menu bar or dashboard. It brings that session's existing iTerm2 or Terminal tab, tmux pane, or IDE window to the front. It never opens a new window or types anything.
+
+### How do I keep my Mac awake while Claude Code is running?
+Agent Status does it for you: while at least one agent is working, it holds macOS's `caffeinate` so the Mac doesn't idle-sleep, and releases it one minute after work stops. Choose when with `claude-s awake always|power|off`.
+
+### Does Claude Code keep working when my Mac is locked?
+Yes. Locking never stops it; sleep does. While an agent works, Agent Status keeps the Mac from idle sleep, so you can lock it and walk away. Closing the lid on battery still sleeps the Mac.
+
+### Does it work with VS Code, Cursor or JetBrains IDEs (PyCharm, IntelliJ IDEA, Rider)?
+Yes. Sessions in any terminal or IDE show up. A click raises the right project window in VS Code, Cursor, Windsurf and JetBrains IDEs (JetBrains is beta), but it can't select a terminal tab inside the IDE.
+
+### Can I approve a request from the menu bar?
 No, by design. A click only takes you to the session; you answer it there.
 
-**Does it drain my battery?**
+### Does it drain my battery?
 Only while agents are working, and for one minute after. `claude-s awake power` keeps the Mac awake only on the power adapter; `claude-s awake off` turns it off.
 
-**Which sessions show up?**
+### Which sessions show up?
 Claude Code sessions running on this Mac, from any terminal or IDE, once the plugin is installed. Cloud sessions and claude.ai chats run elsewhere and can't be seen.
 
-**Do I have to use `claude-s`?**
+### Do I have to use `claude-s`?
 No. After `install.sh`, plain `claude` reports its status. `claude-s` is for the helper commands.
+
+### Does it send any data anywhere?
+No. The service listens on `127.0.0.1` only, keeps its state in `~/.claude/agent-status` and makes no network requests.
 
 ## Contributing
 
@@ -295,7 +314,7 @@ Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Id
 - A native Stream Deck plugin with live key colors
 - Precise tab focus for Ghostty, Warp and IDE terminals
 - Windows support for click-to-focus
-- Desktop notifications when an agent needs input
+- Notifications on Linux
 
 
 ## License

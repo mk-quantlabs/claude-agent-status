@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2
+
+- Plugin manifest: `displayName`, `homepage`, `repository` and a fuller description, ready for plugin directories.
+- Plugin README describing what the plugin gives on its own and what the full install adds.
+- README: clearer intro, FAQ written as the questions people ask, privacy answer.
+- CI validates the plugin and marketplace manifests with `claude plugin validate --strict`.
+
 ## 0.2.1
 
 - `install.sh` installs the plugin in Claude Code (loaded in place from the cloned folder), so plain `claude` reports its status; `--no-plugin` skips it. `uninstall.sh` removes it.
