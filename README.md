@@ -59,7 +59,7 @@ Agent Status fixes all four. It's a Claude Code plugin plus a small local servic
 
 ## Quick start
 
-macOS, with [Claude Code](https://code.claude.com) installed.
+macOS, with [Claude Code](https://code.claude.com) and Node.js 18+ installed.
 
 **With Homebrew:**
 
@@ -68,7 +68,7 @@ brew install mk-quantlabs/tap/agent-status
 agent-status-setup
 ```
 
-**Or from a clone** (needs Node.js 18+):
+**Or from a clone:**
 
 ```bash
 git clone https://github.com/mk-quantlabs/claude-agent-status.git ~/claude-agent-status
