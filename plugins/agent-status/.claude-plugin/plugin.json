@@ -7,6 +7,5 @@
   "homepage": "https://github.com/mk-quantlabs/claude-agent-status#readme",
   "repository": "https://github.com/mk-quantlabs/claude-agent-status",
   "license": "MIT",
-  "keywords": ["status", "dashboard", "menubar", "multi-agent", "parallel-sessions", "notifications", "approvals", "keep-awake", "macos", "hooks", "stream-deck"],
-  "icon": "./.claude-plugin/icon.png"
+  "keywords": ["status", "dashboard", "menubar", "multi-agent", "parallel-sessions", "notifications", "approvals", "keep-awake", "macos", "hooks", "stream-deck"]
 }
